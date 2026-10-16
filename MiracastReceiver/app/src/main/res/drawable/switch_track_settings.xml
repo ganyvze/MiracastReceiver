@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Switch 轨道：开启=淡白底 + accent 描边，关闭=淡白底。
+     半透明 accent 无法从主题属性派生，所以开启态用描边表达选中，滑块本身已是 accent 色。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#3DFFFFFF" />
+            <stroke android:width="2dp" android:color="?attr/colorAccent" />
+            <corners android:radius="13dp" />
+            <size android:width="44dp" android:height="26dp" />
+        </shape>
+    </item>
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#3DFFFFFF" />
+            <stroke android:width="2dp" android:color="?attr/colorAccent" />
+            <corners android:radius="13dp" />
+            <size android:width="44dp" android:height="26dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#33FFFFFF" />
+            <stroke android:width="1dp" android:color="#2EFFFFFF" />
+            <corners android:radius="13dp" />
+            <size android:width="44dp" android:height="26dp" />
+        </shape>
+    </item>
+</selector>

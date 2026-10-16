@@ -5,14 +5,32 @@
   改成 ScrollView + 纵向流式布局：内容从上到下顺序排列，永远不会重叠，
   放不下时可以滚动。字号整体调小，手机和电视都能正常显示。
 -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/background_dark"
-    android:fillViewport="true"
-    android:scrollbars="none"
     tools:context=".ui.MainActivity">
+
+    <!-- 自定义背景层：PageBackdrop 会把用户选的图片/GIF/视频塞进来；默认保持渐变背景。 -->
+    <FrameLayout
+        android:id="@+id/backdrop_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_main_glass_backdrop" />
+
+    <!-- 自定义背景上的暗色遮罩，保证文字可读；默认背景时隐藏 -->
+    <View
+        android:id="@+id/backdrop_scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#73000000"
+        android:visibility="gone" />
+
+<ScrollView
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:scrollbars="none">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -23,6 +41,18 @@
         android:paddingTop="24dp"
         android:paddingRight="24dp"
         android:paddingBottom="24dp">
+
+        <!-- 半透明主卡片，让背景色透出，形成统一的毛玻璃层次。 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_main_glass_panel"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingLeft="24dp"
+            android:paddingTop="28dp"
+            android:paddingRight="24dp"
+            android:paddingBottom="28dp">
 
         <!-- 应用标题 -->
         <TextView
@@ -37,7 +67,7 @@
             android:layout_width="120dp"
             android:layout_height="3dp"
             android:layout_marginTop="10dp"
-            android:background="@color/accent" />
+            android:background="?attr/colorAccent" />
 
         <!-- 设备名称 -->
         <TextView
@@ -54,115 +84,38 @@
 
         <!-- 设备 IP -->
         <TextView
+            android:id="@+id/tv_wifi_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:gravity="center"
+            android:textColor="@color/text_secondary"
+            android:textSize="15sp"
+            tools:text="Wi-Fi：家庭网络" />
+
+        <TextView
             android:id="@+id/tv_device_ip"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
+            android:layout_marginTop="4dp"
             android:gravity="center"
             android:maxLines="1"
             android:textColor="@color/text_secondary"
             android:textSize="15sp"
             tools:text="设备 IP: 192.168.1.100" />
 
-        <!-- 连接码 -->
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:background="@color/background_card"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:paddingLeft="24dp"
-            android:paddingTop="14dp"
-            android:paddingRight="24dp"
-            android:paddingBottom="14dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="连接码"
-                android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
-
-            <TextView
-                android:id="@+id/tv_connection_code"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:letterSpacing="0.15"
-                android:textColor="@color/accent"
-                android:textSize="30sp"
-                android:textStyle="bold"
-                tools:text="ABC123" />
-        </LinearLayout>
-
-        <!-- 状态 -->
-        <TextView
-            android:id="@+id/tv_status"
+        <Button
+            android:id="@+id/btn_settings"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:gravity="center"
-            android:text="@string/waiting_connection"
-            android:textColor="@color/text_secondary"
-            android:textSize="15sp" />
-
-        <ProgressBar
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:layout_marginTop="10dp"
-            android:indeterminate="true"
-            android:indeterminateTint="@color/accent" />
-
-        <!-- 设置：开机自启 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:addStatesFromChildren="true"
+            android:layout_marginTop="28dp"
             android:background="@drawable/bg_setting_item"
-            android:orientation="vertical"
-            android:padding="14dp">
+            android:stateListAnimator="@animator/btn_press_scale"
+            android:text="@string/settings"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp" />
 
-            <androidx.appcompat.widget.SwitchCompat
-                android:id="@+id/switch_auto_start"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:focusable="true"
-                android:focusableInTouchMode="false"
-                android:text="@string/auto_start_on_boot"
-                android:textColor="@color/text_primary"
-                android:textSize="16sp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:lineSpacingExtra="2dp"
-                android:text="@string/auto_start_on_boot_hint"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
         </LinearLayout>
-
-        <!-- 连接说明 -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
-            android:text="@string/how_to_connect"
-            android:textColor="@color/text_secondary"
-            android:textSize="15sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:gravity="center"
-            android:lineSpacingExtra="3dp"
-            android:text="@string/connect_instruction"
-            android:textColor="@color/text_secondary"
-            android:textSize="13sp" />
     </LinearLayout>
-
 </ScrollView>
+</FrameLayout>

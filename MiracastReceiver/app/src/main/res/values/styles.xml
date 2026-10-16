@@ -3,9 +3,22 @@
     <style name="Theme.Leanback" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@color/background_dark</item>
         <item name="android:colorAccent">@color/accent</item>
+        <item name="colorAccent">@color/accent</item>
         <item name="android:fontFamily">sans</item>
         <item name="android:windowNoTitle">true</item>
     </style>
+
+    <!-- 用户可选主题色 overlay：AccentTheme.apply() 在 setContentView 前叠加到当前主题。
+         drawable 统一引用 ?attr/colorAccent，随 overlay 换色。 -->
+    <style name="ThemeAccentRed"><item name="colorAccent">#F44336</item><item name="android:colorAccent">#F44336</item></style>
+    <style name="ThemeAccentOrange"><item name="colorAccent">#FF9800</item><item name="android:colorAccent">#FF9800</item></style>
+    <style name="ThemeAccentYellow"><item name="colorAccent">#FDD835</item><item name="android:colorAccent">#FDD835</item></style>
+    <style name="ThemeAccentGreen"><item name="colorAccent">#00C853</item><item name="android:colorAccent">#00C853</item></style>
+    <style name="ThemeAccentLightBlue"><item name="colorAccent">#40C4FF</item><item name="android:colorAccent">#40C4FF</item></style>
+    <style name="ThemeAccentBlue"><item name="colorAccent">#1E88E5</item><item name="android:colorAccent">#1E88E5</item></style>
+    <style name="ThemeAccentDeepBlue"><item name="colorAccent">#3949AB</item><item name="android:colorAccent">#3949AB</item></style>
+    <style name="ThemeAccentPink"><item name="colorAccent">#F06292</item><item name="android:colorAccent">#F06292</item></style>
+    <style name="ThemeAccentPurple"><item name="colorAccent">#AB47BC</item><item name="android:colorAccent">#AB47BC</item></style>
 
     <style name="Theme.Leanback.Fullscreen" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowFullscreen">true</item>

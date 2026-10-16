@@ -5,6 +5,7 @@ import android.os.Build
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
+import android.net.wifi.WifiInfo
 import timber.log.Timber
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -84,14 +85,23 @@ object NetworkUtils {
      */
     fun getWifiSSID(context: Context): String? {
         try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val networkInfo = cm?.activeNetwork?.let {
+                    cm.getNetworkCapabilities(it)?.transportInfo as? WifiInfo
+                }
+                cleanSsid(networkInfo?.ssid)?.let { return it }
+            }
             val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            val wifiInfo = wifiManager.connectionInfo
-            return wifiInfo.ssid?.replace("\"", "")
+            return cleanSsid(wifiManager.connectionInfo?.ssid)
         } catch (e: Exception) {
             Timber.e(e, "Error getting WiFi SSID")
         }
         return null
     }
+
+    private fun cleanSsid(ssid: String?): String? = ssid?.replace("\"", "")
+        ?.takeUnless { it.isBlank() || it.equals("<unknown ssid>", ignoreCase = true) }
 
     /**
      * 生成随机连接码

@@ -73,7 +73,7 @@
             android:layout_height="24dp"
             android:layout_gravity="center_vertical"
             android:layout_marginStart="12dp"
-            android:indeterminateTint="@color/accent"
+            android:indeterminateTint="?attr/colorAccent"
             android:visibility="gone" />
     </LinearLayout>
 
@@ -102,8 +102,27 @@
         android:layout_height="64dp"
         android:layout_gravity="center"
         android:indeterminate="true"
-        android:indeterminateTint="@color/accent"
+        android:indeterminateTint="?attr/colorAccent"
         android:visibility="visible" />
+
+    <!-- 长按 OK 倍速提示：顶部毛玻璃圆角背景，文字为主题色 -->
+    <TextView
+        android:id="@+id/tv_speed_indicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="32dp"
+        android:background="@drawable/bg_speed_indicator"
+        android:paddingLeft="24dp"
+        android:paddingTop="10dp"
+        android:paddingRight="24dp"
+        android:paddingBottom="10dp"
+        android:textColor="?attr/colorAccent"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        tools:text="5.0倍速中"
+        tools:visibility="visible" />
 
     <!-- 错误提示 -->
     <TextView

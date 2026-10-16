@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Miracast Receiver</string>
+    <string-array name="playback_speeds"><item>0.5x</item><item>0.75x</item><item>1.0x</item><item>1.25x</item><item>1.5x</item><item>2.0x</item><item>3.0x</item><item>5.0x</item></string-array>
+    <string-array name="controller_timeout_options"><item>3 秒</item><item>5 秒</item><item>8 秒</item><item>10 秒</item><item>15 秒</item></string-array>
+    <!-- 与 AccentTheme.COLORS 顺序一一对应 -->
+    <string-array name="theme_color_options"><item>红色</item><item>橙色</item><item>黄色</item><item>绿色</item><item>浅蓝色</item><item>蓝色</item><item>深蓝色</item><item>粉色</item><item>紫色</item></string-array>
+    <string name="app_name">投屏</string>
     <string name="device_name">智能电视</string>
-    <string name="waiting_connection">等待投屏连接...</string>
     <string name="device_ip">设备 IP: %s</string>
     <string name="device_info">设备信息</string>
-    <string name="connection_code">连接码: %s</string>
-    <string name="how_to_connect">如何连接</string>
-    <string name="connect_instruction">1. 确保发送设备与电视在同一局域网\n2. 打开发送端应用\n3. 扫描并选择此设备\n4. 开始投屏</string>
 
     <!-- 连接确认 -->
     <string name="connect_request">投屏连接请求</string>

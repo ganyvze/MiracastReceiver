@@ -9,7 +9,7 @@
             <solid android:color="#2A3350" />
             <stroke
                 android:width="2dp"
-                android:color="@color/accent" />
+                android:color="?attr/colorAccent" />
             <corners android:radius="8dp" />
         </shape>
     </item>

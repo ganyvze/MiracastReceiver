@@ -9,7 +9,6 @@ import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
-import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.view.View
@@ -33,8 +32,12 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.ui.PlayerControlView
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.TimeBar
 import com.weekd.miracastreceiver.R
+import com.weekd.miracastreceiver.util.AccentTheme
+import com.weekd.miracastreceiver.util.AppSettings
 import com.weekd.miracastreceiver.airplay.StreamStats
 import com.weekd.miracastreceiver.miracast.RtpReceiver
 import kotlinx.coroutines.Dispatchers
@@ -87,10 +90,7 @@ class PlayerActivity : AppCompatActivity() {
         private const val QUALITY_AUTO = -1
 
         // Kodi 风格连续快进快退：短时间内连续按键会加大跳转步长
-        private const val SEEK_ACCEL_WINDOW_MS = 1_500L
         private const val SEEK_COMMIT_DELAY_MS = 500L
-        private val SEEK_STEP_TABLE_MS = longArrayOf(10_000L, 30_000L, 60_000L, 120_000L, 300_000L)
-
         private const val ACTION_PLAYBACK_STOPPED = "com.weekd.miracastreceiver.ACTION_PLAYBACK_STOPPED"
     }
 
@@ -101,6 +101,7 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var tvTitle: TextView
     private lateinit var progressBar: ProgressBar
     private lateinit var tvError: TextView
+    private lateinit var speedIndicator: TextView
     private lateinit var tvStreamInfo: TextView
     private lateinit var bufferingIndicator: ProgressBar
 
@@ -127,12 +128,12 @@ class PlayerActivity : AppCompatActivity() {
 
     // Kodi 风格连续快进快退状态
     private var pendingSeekDeltaMs = 0L
-    private var seekAccelerationStep = 0
-    private var lastSeekWasForward = true
-    private var lastSeekPressAt = 0L
+    private var pendingSeekBasePositionMs: Long? = null
     private var seekCommitJob: Job? = null
-    private var isControllerVisible = false
     private var isDialogShowing = false
+    private var okLongPressJob: Job? = null
+    private var isLongPressSpeedActive = false
+    private var okPressCommittedSeek = false
 
     private val controlReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -171,6 +172,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        AccentTheme.apply(this)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_player)
 
@@ -190,6 +192,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun initViews() {
         playerView = findViewById(R.id.player_view)
+        playerView.setControllerShowTimeoutMs(AppSettings.getControllerTimeoutMs(this))
         mirrorSurfaceView = findViewById(R.id.airplay_mirror_surface)
         imageView = findViewById(R.id.image_view)
         tvStatus = findViewById(R.id.tv_status)
@@ -198,6 +201,14 @@ class PlayerActivity : AppCompatActivity() {
         tvError = findViewById(R.id.tv_error)
         tvStreamInfo = findViewById(R.id.tv_stream_info)
         bufferingIndicator = findViewById(R.id.buffering_indicator)
+        speedIndicator = findViewById(R.id.tv_speed_indicator)
+
+        // 控制条播放中会周期性（约每秒）用真实播放位置刷新进度条。快进/快退预览期间
+        // 必须在该回调里同步把预览位置写回去（同一帧内完成），否则进度条会闪回旧位置。
+        playerView.findViewById<PlayerControlView?>(androidx.media3.ui.R.id.exo_controller)
+            ?.setProgressUpdateListener { _, _ ->
+                if (pendingSeekBasePositionMs != null) previewPendingSeek()
+            }
     }
 
     /**
@@ -294,19 +305,8 @@ class PlayerActivity : AppCompatActivity() {
             }
 
         playerView.player = player
-        playerView.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
-            findViewById<View?>(R.id.status_bar)?.visibility = visibility
-            isControllerVisible = visibility == View.VISIBLE
-        })
         playerView.setShowNextButton(true)
         playerView.setShowPreviousButton(true)
-        setupControllerActions()
-    }
-
-    private fun setupControllerActions() {
-        playerView.findViewById<View?>(R.id.btn_more)?.setOnClickListener { showMoreMenu() }
-        playerView.findViewById<View?>(R.id.exo_ffwd)?.setOnClickListener { handleSeekPress(forward = true) }
-        playerView.findViewById<View?>(R.id.exo_rew)?.setOnClickListener { handleSeekPress(forward = false) }
     }
 
     /** 「更多」弹窗：控制条精简后，低频功能都收到这里。 */
@@ -341,23 +341,19 @@ class PlayerActivity : AppCompatActivity() {
         if (speed == 1f) "1.0x" else "${speed}x"
 
     /**
-     * 参考 Kodi 的连续快进快退：短时间内连续按键会累加跳转步长并放大跨度，
-     * 松开按键一段时间后再统一提交一次 seek，避免频繁 seek 造成反复缓冲。
+     * 每次按键按用户设置的秒数或媒体总时长比例跳转。
      */
     private fun handleSeekPress(forward: Boolean) {
-        if (isCurrentImage() || player == null) return
-        val now = SystemClock.elapsedRealtime()
-        val withinAccelWindow = now - lastSeekPressAt <= SEEK_ACCEL_WINDOW_MS
-        seekAccelerationStep = if (withinAccelWindow && forward == lastSeekWasForward) {
-            (seekAccelerationStep + 1).coerceAtMost(SEEK_STEP_TABLE_MS.lastIndex)
+        val currentPlayer = player ?: return
+        if (isCurrentImage()) return
+        if (pendingSeekBasePositionMs == null) pendingSeekBasePositionMs = currentPlayer.currentPosition
+        val configuredValue = if (forward) AppSettings.getForwardValue(this) else AppSettings.getRewindValue(this)
+        val duration = player?.duration?.takeIf { it > 0 } ?: 0L
+        val step = if (AppSettings.isSeekByPercent(this) && duration > 0) {
+            (duration * configuredValue / 100f).toLong()
         } else {
-            pendingSeekDeltaMs = 0L
-            0
+            (configuredValue * 1000).toLong()
         }
-        lastSeekWasForward = forward
-        lastSeekPressAt = now
-
-        val step = SEEK_STEP_TABLE_MS[seekAccelerationStep]
         pendingSeekDeltaMs += if (forward) step else -step
 
         previewPendingSeek()
@@ -372,7 +368,10 @@ class PlayerActivity : AppCompatActivity() {
     private fun previewPendingSeek() {
         val currentPlayer = player ?: return
         val duration = currentPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
-        val target = (currentPlayer.currentPosition + pendingSeekDeltaMs).coerceIn(0L, duration)
+        val target = ((pendingSeekBasePositionMs ?: currentPlayer.currentPosition) + pendingSeekDeltaMs).coerceIn(0L, duration)
+        // 仅更新控制栏显示，实际播放器仍在延迟提交时才 seek，避免连续按键反复缓冲。
+        (playerView.findViewById<View?>(R.id.exo_progress) as? TimeBar)?.setPosition(target)
+        playerView.findViewById<TextView?>(R.id.exo_position)?.text = formatTimeMs(target)
         val sign = if (pendingSeekDeltaMs >= 0) "+" else "-"
         val deltaSeconds = kotlin.math.abs(pendingSeekDeltaMs) / 1000
         tvStatus.text = "${sign}${deltaSeconds}s  ${formatTimeMs(target)}"
@@ -381,12 +380,15 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun commitPendingSeek() {
         val currentPlayer = player ?: return
-        if (pendingSeekDeltaMs == 0L) return
+        if (pendingSeekDeltaMs == 0L) {
+            pendingSeekBasePositionMs = null
+            return
+        }
         val duration = currentPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
-        val target = (currentPlayer.currentPosition + pendingSeekDeltaMs).coerceIn(0L, duration)
+        val target = ((pendingSeekBasePositionMs ?: currentPlayer.currentPosition) + pendingSeekDeltaMs).coerceIn(0L, duration)
         currentPlayer.seekTo(target)
         pendingSeekDeltaMs = 0L
-        seekAccelerationStep = 0
+        pendingSeekBasePositionMs = null
         reportPlaybackPosition()
     }
 
@@ -403,6 +405,44 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val isOkKey = event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER
+        if (isOkKey && !isCurrentImage() && !isDialogShowing && player != null) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                if (pendingSeekDeltaMs != 0L) {
+                    seekCommitJob?.cancel()
+                    commitPendingSeek()
+                    okPressCommittedSeek = true
+                    return true
+                }
+                isLongPressSpeedActive = false
+                okLongPressJob?.cancel()
+                okLongPressJob = lifecycleScope.launch {
+                    delay(500)
+                    val speed = AppSettings.getLongPressSpeed(this@PlayerActivity)
+                    player?.setPlaybackSpeed(speed)
+                    isLongPressSpeedActive = true
+                    speedIndicator.text = String.format("%.1f倍速中", speed)
+                    speedIndicator.visibility = View.VISIBLE
+                }
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_DOWN) return true
+            if (event.action == KeyEvent.ACTION_UP) {
+                if (okPressCommittedSeek) {
+                    okPressCommittedSeek = false
+                    return true
+                }
+                okLongPressJob?.cancel()
+                if (isLongPressSpeedActive) {
+                    player?.setPlaybackSpeed(1f)
+                    currentSpeed = 1f
+                    speedIndicator.visibility = View.GONE
+                } else {
+                    player?.let { if (it.isPlaying) it.pause() else it.play() }
+                }
+                return true
+            }
+        }
         if (event.action == KeyEvent.ACTION_DOWN && !isDialogShowing) {
             // 镜像/Miracast 没有控制条，INFO / MENU 键是信息面板的唯一入口
             if (event.keyCode == KeyEvent.KEYCODE_INFO || event.keyCode == KeyEvent.KEYCODE_MENU) {
@@ -416,20 +456,22 @@ class PlayerActivity : AppCompatActivity() {
             }
         }
         if (event.action == KeyEvent.ACTION_DOWN && !isCurrentImage() && !isDialogShowing) {
+            val isPlayPauseKey = event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+            if (isPlayPauseKey && player != null) {
+                player?.let { activePlayer ->
+                    if (activePlayer.isPlaying) activePlayer.pause() else activePlayer.play()
+                }
+                playerView.showController()
+                return true
+            }
+
             val isForwardKey = event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
                 event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
             val isRewindKey = event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
                 event.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND
             if (isForwardKey || isRewindKey) {
-                val isHardwareSeekKey = event.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND ||
-                    event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
-                val inSeekMode = SystemClock.elapsedRealtime() - lastSeekPressAt <= SEEK_ACCEL_WINDOW_MS
-                // 方向键仅在 OSD 未显示或正处于连续快进快退中时才拦截用于 seek，
-                // 否则放行给控制条做按钮焦点导航（与 Kodi 行为一致）。
-                if (isHardwareSeekKey || inSeekMode || !isControllerVisible) {
-                    handleSeekPress(forward = isForwardKey)
-                    return true
-                }
+                handleSeekPress(forward = isForwardKey)
+                return true
             }
         }
         return super.dispatchKeyEvent(event)

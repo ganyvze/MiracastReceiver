@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 下拉框弹出菜单背景：不透明的深色圆角面板，盖住底层内容。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#F21E2637" />
+    <stroke android:width="1dp" android:color="#33FFFFFF" />
+    <corners android:radius="12dp" />
+</shape>

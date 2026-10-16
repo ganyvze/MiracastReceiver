@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 分段控件文字颜色：选中时深色字压在 accent 底色上，未选中白色。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:color="#0B1424" />
+    <item android:color="@color/text_primary" />
+</selector>

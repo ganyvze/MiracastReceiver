@@ -108,6 +108,9 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.0")
     implementation("androidx.media3:media3-common:1.5.0")
 
+    // 图片 / GIF 加载（设置页自定义背景用，GIF 会自动播放）
+    implementation("com.github.bumptech.glide:glide:4.16.0")
+
     // WebRTC
     implementation("org.webrtc:google-webrtc:1.0.32006")
 

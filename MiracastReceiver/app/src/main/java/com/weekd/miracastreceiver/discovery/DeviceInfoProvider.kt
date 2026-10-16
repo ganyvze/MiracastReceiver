@@ -5,6 +5,7 @@ import android.os.Build
 import android.provider.Settings
 import com.weekd.miracastreceiver.utils.CodecUtils
 import com.weekd.miracastreceiver.utils.NetworkUtils
+import com.weekd.miracastreceiver.util.AppSettings
 
 /**
  * 设备信息提供器
@@ -19,6 +20,7 @@ class DeviceInfoProvider(private val context: Context) {
      * 常量 Settings.Global.DEVICE_NAME 是 API 25 才加的，minSdk 21 所以直接用键名。
      */
     fun getDeviceName(): String {
+        AppSettings.getDeviceName(context)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
         val systemName = try {
             Settings.Global.getString(context.contentResolver, "device_name")
         } catch (e: Exception) {

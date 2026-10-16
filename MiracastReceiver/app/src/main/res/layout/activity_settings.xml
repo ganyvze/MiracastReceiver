@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+
+    <!-- 自定义背景层：PageBackdrop 会把用户选的图片/GIF/视频塞进来；默认保持渐变背景。 -->
+    <FrameLayout
+        android:id="@+id/backdrop_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_main_glass_backdrop" />
+
+    <!-- 自定义背景上的暗色遮罩，保证文字可读；默认背景时隐藏 -->
+    <View
+        android:id="@+id/backdrop_scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#73000000"
+        android:visibility="gone" />
+
+<ScrollView android:layout_width="match_parent" android:layout_height="match_parent"
+    android:fillViewport="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:padding="24dp">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal" android:text="设置" android:textColor="@color/text_primary"
+            android:textSize="28sp" android:textStyle="bold" />
+        <View android:layout_width="120dp" android:layout_height="3dp" android:layout_gravity="center_horizontal"
+            android:layout_marginTop="10dp" android:background="?attr/colorAccent" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="22dp" android:background="@drawable/bg_main_glass_panel"
+            android:orientation="vertical" android:padding="20dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="设备名称"
+                android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold" />
+            <EditText android:id="@+id/input_device_name" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:background="@drawable/bg_settings_input" android:hint="投屏设备名称"
+                android:paddingLeft="14dp" android:paddingTop="12dp" android:paddingRight="14dp" android:paddingBottom="12dp"
+                android:singleLine="true" android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="22dp"
+                android:text="快进 / 快退设置" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold" />
+            <!-- 分段控件：隐藏原生圆点，用选中底色表达状态，电视上远看也能一眼分清。 -->
+            <RadioGroup android:id="@+id/group_seek_mode" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:background="@drawable/bg_settings_radio_group"
+                android:orientation="horizontal" android:padding="4dp">
+                <RadioButton android:id="@+id/radio_seek_seconds" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:layout_marginEnd="2dp" android:background="@drawable/bg_settings_radio" android:button="@null"
+                    android:gravity="center" android:paddingTop="10dp" android:paddingBottom="10dp"
+                    android:text="按秒数" android:textColor="@color/settings_radio_text" android:textSize="15sp" />
+                <RadioButton android:id="@+id/radio_seek_percent" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:layout_marginStart="2dp" android:background="@drawable/bg_settings_radio" android:button="@null"
+                    android:gravity="center" android:paddingTop="10dp" android:paddingBottom="10dp"
+                    android:text="按总时长比例" android:textColor="@color/settings_radio_text" android:textSize="15sp" />
+            </RadioGroup>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="horizontal">
+                <EditText android:id="@+id/input_rewind" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:background="@drawable/bg_settings_input" android:hint="快退" android:inputType="numberDecimal"
+                    android:paddingLeft="14dp" android:paddingTop="12dp" android:paddingRight="14dp" android:paddingBottom="12dp"
+                    android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+                <EditText android:id="@+id/input_forward" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:layout_weight="1"
+                    android:background="@drawable/bg_settings_input" android:hint="快进" android:inputType="numberDecimal"
+                    android:paddingLeft="14dp" android:paddingTop="12dp" android:paddingRight="14dp" android:paddingBottom="12dp"
+                    android:textColor="@color/text_primary" android:textColorHint="@color/text_secondary" />
+            </LinearLayout>
+            <TextView android:id="@+id/tv_seek_hint" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:text="每次按左 / 右键快退或快进的秒数"
+                android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="22dp"
+                android:text="长按 OK 倍速" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold" />
+            <!-- 下拉箭头用叠加的 ImageView 实现：minSdk 21 下 layer-list 不支持 item gravity，背景里塞箭头会拉伸变形。 -->
+            <FrameLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+                <Spinner android:id="@+id/spinner_long_press_speed" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:background="@drawable/bg_settings_spinner" android:entries="@array/playback_speeds"
+                    android:paddingLeft="14dp" android:paddingTop="12dp" android:paddingRight="40dp" android:paddingBottom="12dp"
+                    android:popupBackground="@drawable/bg_settings_spinner_popup" />
+                <ImageView android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="end|center_vertical"
+                    android:layout_marginEnd="14dp" android:clickable="false" android:focusable="false"
+                    android:importantForAccessibility="no" android:src="@drawable/ic_spinner_arrow" />
+            </FrameLayout>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="22dp"
+                android:text="控制栏自动隐藏时间" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold" />
+            <FrameLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+                <Spinner android:id="@+id/spinner_controller_timeout" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:background="@drawable/bg_settings_spinner" android:entries="@array/controller_timeout_options"
+                    android:paddingLeft="14dp" android:paddingTop="12dp" android:paddingRight="40dp" android:paddingBottom="12dp"
+                    android:popupBackground="@drawable/bg_settings_spinner_popup" />
+                <ImageView android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="end|center_vertical"
+                    android:layout_marginEnd="14dp" android:clickable="false" android:focusable="false"
+                    android:importantForAccessibility="no" android:src="@drawable/ic_spinner_arrow" />
+            </FrameLayout>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="22dp"
+                android:text="主题色" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold" />
+            <FrameLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp">
+                <Spinner android:id="@+id/spinner_theme_color" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:background="@drawable/bg_settings_spinner" android:entries="@array/theme_color_options"
+                    android:paddingLeft="14dp" android:paddingTop="12dp" android:paddingRight="40dp" android:paddingBottom="12dp"
+                    android:popupBackground="@drawable/bg_settings_spinner_popup" />
+                <ImageView android:layout_width="20dp" android:layout_height="20dp" android:layout_gravity="end|center_vertical"
+                    android:layout_marginEnd="14dp" android:clickable="false" android:focusable="false"
+                    android:importantForAccessibility="no" android:src="@drawable/ic_spinner_arrow" />
+            </FrameLayout>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="22dp"
+                android:text="主页背景" android:textColor="@color/text_primary" android:textSize="17sp" android:textStyle="bold" />
+            <Button android:id="@+id/btn_pick_background" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:background="@drawable/bg_btn_ghost"
+                android:paddingTop="12dp" android:paddingBottom="12dp"
+                android:stateListAnimator="@animator/btn_press_scale"
+                android:text="选择文件" android:textColor="@color/text_primary" android:textSize="15sp" />
+            <TextView android:id="@+id/tv_background_hint" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:ellipsize="middle" android:singleLine="true"
+                android:text="当前：默认背景" android:textColor="@color/text_secondary" android:textSize="12sp" />
+            <androidx.appcompat.widget.SwitchCompat android:id="@+id/switch_auto_start" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="22dp" android:paddingTop="6dp" android:paddingBottom="6dp"
+                android:text="开机自动启动投屏服务" android:textColor="@color/text_primary" android:textSize="16sp"
+                android:thumb="@drawable/switch_thumb_settings" android:track="@drawable/switch_track_settings" />
+            <Button android:id="@+id/btn_reset" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="20dp" android:background="@drawable/bg_btn_ghost"
+                android:paddingTop="12dp" android:paddingBottom="12dp"
+                android:stateListAnimator="@animator/btn_press_scale"
+                android:text="恢复默认" android:textColor="@color/text_primary" android:textSize="16sp" />
+            <Button android:id="@+id/btn_apply" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="10dp" android:background="@drawable/bg_btn_primary"
+                android:paddingTop="12dp" android:paddingBottom="12dp"
+                android:stateListAnimator="@animator/btn_press_scale"
+                android:text="应用" android:textColor="#0B1424" android:textSize="16sp" android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>
+</FrameLayout>

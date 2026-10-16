@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 分段控件选项背景：选中=accent 实心，焦点=高亮描边，默认=淡白底。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="?attr/colorAccent" />
+            <stroke android:width="2dp" android:color="#FFFFFF" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+    <item android:state_checked="true">
+        <shape android:shape="rectangle">
+            <solid android:color="?attr/colorAccent" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#2A3350" />
+            <stroke android:width="2dp" android:color="?attr/colorAccent" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#14FFFFFF" />
+            <corners android:radius="10dp" />
+        </shape>
+    </item>
+</selector>

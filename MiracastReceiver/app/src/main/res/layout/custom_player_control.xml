@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  极简两行控制条：进度行 + 传输控制行。
-  画质/播放速度/字幕/屏幕方向/视频信息都收进「更多」弹窗（btn_more），
-  避免 OSD 在电视上占掉近一半屏幕高度。
+  播放/暂停与时间显示在进度条两端，控制栏保持紧凑、不遮挡画面。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -23,28 +21,70 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/exo_position"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:includeFontPadding="false"
-            android:paddingLeft="4dp"
-            android:paddingRight="4dp"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+        <!-- Media3 识别此 ID，并自动根据播放状态切换图标和点击行为。 -->
+        <ImageButton
+            android:id="@+id/exo_play_pause"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="false"
+            android:contentDescription="当前播放状态"
+            android:focusable="false"
+            android:scaleType="center"
+            android:tint="@color/text_primary" />
 
-        <androidx.media3.ui.DefaultTimeBar
-            android:id="@+id/exo_progress"
+        <FrameLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content">
+            <TextView
+                android:id="@+id/exo_position"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:paddingLeft="4dp"
+                android:paddingRight="4dp"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tv_preview_position"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:paddingLeft="4dp"
+                android:paddingRight="4dp"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <FrameLayout
             android:layout_width="0dp"
             android:layout_height="24dp"
-            android:layout_weight="1"
-            app:played_color="@color/accent"
-            app:buffered_color="@color/text_secondary"
-            app:unplayed_color="#40FFFFFF"
-            app:scrubber_color="@color/accent"
-            app:scrubber_enabled_size="14dp"
-            app:scrubber_disabled_size="0dp" />
+            android:layout_weight="1">
+            <androidx.media3.ui.DefaultTimeBar
+                android:id="@+id/exo_progress"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                app:played_color="?attr/colorAccent"
+                app:buffered_color="@color/text_secondary"
+                app:unplayed_color="#40FFFFFF"
+                app:scrubber_color="?attr/colorAccent"
+                app:scrubber_enabled_size="14dp"
+                app:scrubber_disabled_size="0dp" />
+            <androidx.media3.ui.DefaultTimeBar
+                android:id="@+id/preview_progress"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone"
+                app:played_color="?attr/colorAccent"
+                app:buffered_color="@color/text_secondary"
+                app:unplayed_color="#40FFFFFF"
+                app:scrubber_color="?attr/colorAccent"
+                app:scrubber_enabled_size="14dp"
+                app:scrubber_disabled_size="0dp" />
+        </FrameLayout>
 
         <TextView
             android:id="@+id/exo_duration"
@@ -56,85 +96,6 @@
             android:textColor="@color/text_primary"
             android:textSize="14sp"
             android:textStyle="bold" />
-    </LinearLayout>
-
-    <!-- 传输控制 + 更多 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:orientation="horizontal">
-
-        <!-- 上一个 -->
-        <ImageButton
-            android:id="@+id/exo_prev"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="4dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="上一个"
-            android:scaleType="fitCenter"
-            android:src="@android:drawable/ic_menu_revert"
-            android:tint="@color/text_primary" />
-
-        <!-- 后退 -->
-        <ImageButton
-            android:id="@+id/exo_rew"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="4dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="后退"
-            android:scaleType="fitCenter"
-            android:src="@android:drawable/ic_media_rew"
-            android:tint="@color/text_primary" />
-
-        <!-- 播放/暂停 -->
-        <ImageButton
-            android:id="@+id/exo_play_pause"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
-            android:layout_margin="4dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="播放/暂停"
-            android:scaleType="fitCenter"
-            android:tint="@color/text_primary" />
-
-        <!-- 前进 -->
-        <ImageButton
-            android:id="@+id/exo_ffwd"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="4dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="前进"
-            android:scaleType="fitCenter"
-            android:src="@android:drawable/ic_media_ff"
-            android:tint="@color/text_primary" />
-
-        <!-- 下一个 -->
-        <ImageButton
-            android:id="@+id/exo_next"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="4dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="下一个"
-            android:scaleType="fitCenter"
-            android:src="@android:drawable/ic_menu_revert"
-            android:tint="@color/text_primary" />
-
-        <!-- 更多：画质 / 速度 / 字幕 / 方向 / 视频信息 -->
-        <ImageButton
-            android:id="@+id/btn_more"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_margin="4dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="更多"
-            android:scaleType="fitCenter"
-            android:src="@android:drawable/ic_menu_more"
-            android:tint="@color/text_primary" />
     </LinearLayout>
 
 </LinearLayout>

@@ -11,20 +11,20 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 import com.weekd.miracastreceiver.R
 import com.weekd.miracastreceiver.discovery.DeviceInfoProvider
 import com.weekd.miracastreceiver.discovery.MdnsAdvertiser
 import com.weekd.miracastreceiver.service.CastReceiverService
+import com.weekd.miracastreceiver.util.AccentTheme
 import com.weekd.miracastreceiver.util.AppSettings
 import com.weekd.miracastreceiver.utils.NetworkUtils
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import timber.log.Timber
 import android.widget.TextView
+import android.widget.Button
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
 
 /**
  * 主 Activity - 等待投屏连接
@@ -36,11 +36,14 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var tvDeviceName: TextView
     private lateinit var tvDeviceIp: TextView
-    private lateinit var tvConnectionCode: TextView
-    private lateinit var tvStatus: TextView
-    private lateinit var switchAutoStart: SwitchCompat
+    private lateinit var tvWifiName: TextView
 
     private var connectionCode: String = ""
+
+    /** 页面创建时应用的主题色/背景快照，用于从设置页返回时判断是否需要 recreate */
+    private var appliedAccentIndex = -1
+    private var appliedBackgroundSignature = ""
+    private lateinit var backdrop: PageBackdrop
 
     /** 定位权限弹窗还在时不叠加悬浮窗权限提示，等它有结果再说 */
     private var wifiPermissionPending = false
@@ -48,16 +51,17 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val REQUEST_CODE_PERMISSIONS = 1001
+        private const val REQUEST_SETTINGS = 1002
 
         /**
          * Wi-Fi Direct 需要的危险权限，必须运行时申请。
          *
          * 少了它 `WifiP2pManager.createGroup()` 会抛 SecurityException，Miracast 直接不可用
-         * （AirPlay / DLNA 不受影响）。Android 13+ 用 NEARBY_WIFI_DEVICES 取代定位权限。
+         * （AirPlay / DLNA 不受影响）。读取 Wi-Fi 名称仍需定位权限，因此两个权限都申请。
          */
         private val WIFI_DIRECT_PERMISSIONS: Array<String>
             get() = if (Build.VERSION.SDK_INT >= 33) {
-                arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES)
+                arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES, Manifest.permission.ACCESS_FINE_LOCATION)
             } else {
                 // Android 12+ 只申请 FINE 会被系统直接拒绝，必须两个一起申请
                 arrayOf(
@@ -68,14 +72,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        AccentTheme.apply(this)
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        backdrop = PageBackdrop(this, findViewById(R.id.backdrop_container), findViewById(R.id.backdrop_scrim))
+        backdrop.apply()
+        appliedAccentIndex = AppSettings.getAccentIndex(this)
+        appliedBackgroundSignature = backgroundSignature()
 
         initServices()
         initViews()
         requestWifiDirectPermissions()
         checkNetworkAndStart()
     }
+
+    private fun backgroundSignature(): String =
+        "${AppSettings.getBackgroundType(this)}|${AppSettings.getBackgroundUri(this)}"
 
     private fun requestWifiDirectPermissions() {
         val missing = WIFI_DIRECT_PERMISSIONS.filter {
@@ -103,14 +115,16 @@ class MainActivity : AppCompatActivity() {
             // 权限是在服务启动之后才拿到的，重启一次服务让 Wi-Fi Direct 重新初始化
             Timber.i("Wi-Fi Direct permissions granted, restarting cast service")
             startCastService()
+            refreshWifiName()
         } else {
             Timber.w("Wi-Fi Direct permissions denied — Miracast unavailable")
-            tvStatus.text = "未授予定位权限，Windows 无线投屏不可用"
+            Toast.makeText(this, "未授予定位权限，Windows 无线投屏不可用", Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onResume() {
         super.onResume()
+        if (::tvWifiName.isInitialized) refreshWifiName()
         if (!wifiPermissionPending) promptOverlayPermissionIfNeeded()
     }
 
@@ -171,34 +185,29 @@ class MainActivity : AppCompatActivity() {
     private fun initViews() {
         tvDeviceName = findViewById(R.id.tv_device_name)
         tvDeviceIp = findViewById(R.id.tv_device_ip)
-        tvConnectionCode = findViewById(R.id.tv_connection_code)
-        tvStatus = findViewById(R.id.tv_status)
-        switchAutoStart = findViewById(R.id.switch_auto_start)
-
-        // 开机自启开关
-        switchAutoStart.isChecked = AppSettings.isAutoStartOnBoot(this)
-        switchAutoStart.setOnCheckedChangeListener { _, isChecked ->
-            AppSettings.setAutoStartOnBoot(this, isChecked)
-            Timber.i("Auto start on boot set to $isChecked")
+        tvWifiName = findViewById(R.id.tv_wifi_name)
+        refreshWifiName()
+        findViewById<Button>(R.id.btn_settings).setOnClickListener {
+            // 延迟一拍再跳转，让按钮松开的回弹动画先播出来
+            it.postDelayed({
+                startActivityForResult(Intent(this, SettingsActivity::class.java), REQUEST_SETTINGS)
+            }, 200)
         }
 
         // 设置设备名称
         val deviceName = deviceInfoProvider.getDeviceName()
         tvDeviceName.text = deviceName
-
-        // 设置连接码
-        tvConnectionCode.text = getString(R.string.connection_code, connectionCode)
     }
 
     private fun checkNetworkAndStart() {
         if (!NetworkUtils.isNetworkAvailable(this)) {
-            tvStatus.text = "网络未连接"
+            Toast.makeText(this, "网络未连接", Toast.LENGTH_LONG).show()
             Timber.w("Network not available")
             return
         }
 
         if (!NetworkUtils.isWifiConnected(this)) {
-            tvStatus.text = "未连接到 Wi-Fi"
+            Toast.makeText(this, "未连接到 Wi-Fi", Toast.LENGTH_LONG).show()
             Timber.w("WiFi not connected")
         }
 
@@ -210,13 +219,24 @@ class MainActivity : AppCompatActivity() {
         } else {
             tvDeviceIp.text = getString(R.string.device_ip, "获取中...")
         }
-
         // 启动服务
         startCastService()
         startAdvertising()
 
-        // 更新状态
-        updateStatus()
+    }
+
+    private fun refreshWifiName() {
+        val ssid = NetworkUtils.getWifiSSID(this)
+        val name = when {
+            !ssid.isNullOrBlank() -> ssid
+            NetworkUtils.isWifiConnected(this) -> "已连接（名称不可用）"
+            else -> "未连接"
+        }
+        val prefix = "Wi-Fi："
+        tvWifiName.text = SpannableString(prefix + name).apply {
+            setSpan(ForegroundColorSpan(ContextCompat.getColor(this@MainActivity, R.color.text_secondary)), 0, prefix.length, 0)
+            setSpan(ForegroundColorSpan(AccentTheme.currentColor(this@MainActivity)), prefix.length, length, 0)
+        }
     }
 
     private fun startCastService() {
@@ -245,22 +265,28 @@ class MainActivity : AppCompatActivity() {
         Timber.i("Started AirPlay and Miracast advertising: $deviceName")
     }
 
-    private fun updateStatus() {
-        lifecycleScope.launch {
-            while (true) {
-                if (mdnsAdvertiser.isAdvertising()) {
-                    tvStatus.text = getString(R.string.waiting_connection)
-                } else {
-                    tvStatus.text = "服务启动中..."
-                }
-                delay(2000)
-            }
-        }
-    }
-
     override fun onDestroy() {
         super.onDestroy()
         mdnsAdvertiser.stopAdvertising()
         Timber.i("MainActivity destroyed")
+    }
+
+    @Deprecated("Deprecated in Android API")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_SETTINGS && resultCode == RESULT_OK) {
+            // 主题色或背景变了：直接 recreate 整页重建（服务启动逻辑在 onCreate 里会重跑）
+            if (AppSettings.getAccentIndex(this) != appliedAccentIndex ||
+                backgroundSignature() != appliedBackgroundSignature
+            ) {
+                recreate()
+                return
+            }
+            tvDeviceName.text = deviceInfoProvider.getDeviceName()
+            mdnsAdvertiser.stopAdvertising()
+            stopService(Intent(this, CastReceiverService::class.java))
+            startCastService()
+            startAdvertising()
+        }
     }
 }
