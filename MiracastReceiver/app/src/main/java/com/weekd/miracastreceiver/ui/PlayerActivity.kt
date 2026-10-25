@@ -176,6 +176,10 @@ class PlayerActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_player)
 
+        // 播放期间保持屏幕常亮：索尼等电视对无操作计时较激进，
+        // 不加这个标志播放一段时间后会进系统屏保
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         initViews()
         initPlayer()
         handleIntent(intent)
