@@ -111,6 +111,10 @@
                 android:layout_marginTop="22dp" android:paddingTop="6dp" android:paddingBottom="6dp"
                 android:text="开机自动启动投屏服务" android:textColor="@color/text_primary" android:textSize="16sp"
                 android:thumb="@drawable/switch_thumb_settings" android:track="@drawable/switch_track_settings" />
+            <androidx.appcompat.widget.SwitchCompat android:id="@+id/switch_castplus" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="10dp" android:paddingTop="6dp" android:paddingBottom="6dp"
+                android:text="华为 Cast+ 接收（实验性）" android:textColor="@color/text_primary" android:textSize="16sp"
+                android:thumb="@drawable/switch_thumb_settings" android:track="@drawable/switch_track_settings" />
             <Button android:id="@+id/btn_reset" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="20dp" android:background="@drawable/bg_btn_ghost"
                 android:paddingTop="12dp" android:paddingBottom="12dp"
