@@ -10,17 +10,23 @@ val targetAbis = when {
     else -> listOf("arm64-v8a", "armeabi-v7a")
 }
 val buildUniversalApk = targetAbis.size > 1
+val useUxPlay = providers.gradleProperty("useUxPlay").isPresent
+if (useUxPlay) require(targetAbis.all { it in listOf("armeabi-v7a", "arm64-v8a") }) {
+    "UxPlay libraries are available for ARM32 and ARM64 only"
+}
 
 android {
-    namespace = "com.weekd.miracastreceiver"
+    namespace = "top.jast.miracastreceiver"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.weekd.miracastreceiver"
+        applicationId = "top.jast.miracastreceiver"
         minSdk = 21
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.2.5"
+        versionCode = 22
+        versionName = "1.2.14"
+        buildConfigField("boolean", "USE_UXPLAY", useUxPlay.toString())
+        if (useUxPlay) minSdk = 23
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -59,6 +65,13 @@ android {
         }
     }
 
+    // 应用内可切换界面语言，AAB 不能按语言拆包，否则切到设备没下载的语言会缺资源
+    bundle {
+        language {
+            enableSplit = false
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -68,13 +81,23 @@ android {
         jvmTarget = "17"
     }
 
+    testOptions {
+        // Protocol tests construct ContextWrapper without calling Android services.
+        unitTests.isReturnDefaultValues = true
+    }
+
     buildFeatures {
         viewBinding = true
         buildConfig = true
     }
+    if (useUxPlay) sourceSets["main"].jniLibs.srcDir("src/uxplay/jniLibs")
 }
 
 dependencies {
+    implementation("com.google.zxing:core:3.5.3")
+    // Experimental Huawei Cast+ receiver. Source/provenance recorded next to the binary.
+    implementation(files("libs/HuaweiCastPlusEngine.jar"))
+
     // AndroidX Core
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
@@ -107,12 +130,6 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.5.0")
     implementation("androidx.media3:media3-ui:1.5.0")
     implementation("androidx.media3:media3-common:1.5.0")
-
-    // 图片 / GIF 加载（设置页自定义背景用，GIF 会自动播放）
-    implementation("com.github.bumptech.glide:glide:4.16.0")
-
-    // WebRTC
-    implementation("org.webrtc:google-webrtc:1.0.32006")
 
     // Logging
     implementation("com.jakewharton.timber:timber:5.0.1")

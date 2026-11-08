@@ -1,43 +1,131 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 默认语言（英文）。其他语言见 values-zh、values-zh-rTW 等目录，新增条目时要同步补齐。 -->
 <resources>
-    <string-array name="playback_speeds"><item>0.5x</item><item>0.75x</item><item>1.0x</item><item>1.25x</item><item>1.5x</item><item>2.0x</item><item>3.0x</item><item>5.0x</item></string-array>
-    <string-array name="controller_timeout_options"><item>3 秒</item><item>5 秒</item><item>8 秒</item><item>10 秒</item><item>15 秒</item></string-array>
-    <!-- 与 AccentTheme.COLORS 顺序一一对应 -->
-    <string-array name="theme_color_options"><item>红色</item><item>橙色</item><item>黄色</item><item>绿色</item><item>浅蓝色</item><item>蓝色</item><item>深蓝色</item><item>粉色</item><item>紫色</item></string-array>
-    <string name="app_name">投屏</string>
-    <string name="device_name">智能电视</string>
-    <string name="device_ip">设备 IP: %s</string>
-    <string name="device_info">设备信息</string>
+    <string name="auto_rotate_to_fit">Auto-rotate to fit screen</string>
+    <string name="app_name" translatable="false">Miracast Receiver</string>
+
+    <!-- 首页 -->
+    <string name="waiting_connection">Waiting for a cast connection…</string>
+    <string name="device_ip">Device IP: %s</string>
+    <string name="device_ip_fetching">Detecting…</string>
+    <string name="how_to_connect">How to connect</string>
+    <string name="connect_instruction">1. Make sure the sending device and the TV are on the same local network\n2. Open the casting app on the sender\n3. Scan for and select this device\n4. Start casting</string>
+    <string name="auto_start_on_boot">Start receiver on boot</string>
+    <string name="auto_start_on_boot_hint">Runs in the background after the TV turns on, without opening this app. Some TVs also require allowing auto-start for this app in system settings.</string>
+    <string name="return_to_app_after_cast">Return to this app after casting</string>
+    <string name="return_to_app_after_cast_hint">Stops on this settings page instead of going back to the TV home screen when you stop casting. Useful when you want to change settings right after a session.</string>
+    <string name="language">Language</string>
+    <string name="language_follow_system">Follow system</string>
+    <string name="status_no_network">No network connection</string>
+    <string name="status_no_wifi">Not connected to Wi-Fi</string>
+    <string name="status_service_starting">Starting service…</string>
+    <string name="status_waiting_network">Waiting for a network address. Check the network connection.</string>
+    <string name="status_receiver_running">Receiver service is running. Waiting for a connection.</string>
+    <string name="status_receiver_stopped">Receiver service is stopped. Reopen the app to retry.</string>
+    <string name="status_miracast_checking">Checking Windows / Android screen mirroring…</string>
+    <string name="status_miracast_advertising">Miracast discovery configured. On Windows press Win+K; on Android open wireless display. Discovery also depends on the device driver.</string>
+    <string name="status_miracast_system">System Wi-Fi Display is enabled. If the device is missing from Win+K, open the system screen mirroring receiver and try again; this switch alone does not confirm receiving support.</string>
+    <string name="status_miracast_root_required">Windows / Android screen mirroring is unavailable: root access was not granted. If this device has a system screen mirroring receiver, enable it first; otherwise root is required to enable discovery. AirPlay, DLNA and VLC Cast can still be used.</string>
+    <string name="status_miracast_failed">Windows / Android screen mirroring could not be configured. Check system screen mirroring, Wi-Fi Direct support and root authorization, then reopen the app to retry. Please include ADB logs if it still fails. Other casting methods can still be used.</string>
+    <string name="status_miracast_unsupported">This device does not provide Wi-Fi Direct, which Windows / Android screen mirroring requires. Use AirPlay, DLNA or VLC Cast.</string>
+    <string name="status_miracast_permission">Windows / Android screen mirroring needs the Nearby devices or Location permission. Grant it in system app settings and reopen the app.</string>
+    <string name="status_miracast_wifi_disabled">Windows / Android screen mirroring needs Wi-Fi Direct. Enable Wi-Fi and reopen the app; an Ethernet connection alone is not enough.</string>
+    <string name="status_permission_denied">Location permission not granted. Windows wireless casting is unavailable.</string>
+
+    <!-- 悬浮窗权限 -->
+    <string name="overlay_permission_title">\"Display over other apps\" permission required</string>
+    <string name="overlay_permission_message">When this app is not open (for example after auto-start on boot, or after returning to the home screen), the system blocks the cast screen from appearing, so casting seems to do nothing.\n\nPlease enable this permission for the app on the next settings page.</string>
+    <string name="overlay_permission_open">Open settings</string>
+    <string name="overlay_permission_later">Later</string>
+    <string name="overlay_settings_missing">This device has no such settings page. Run via adb: appops set %s SYSTEM_ALERT_WINDOW allow</string>
 
     <!-- 连接确认 -->
-    <string name="connect_request">投屏连接请求</string>
-    <string name="device_request">设备 %s 请求投屏</string>
-    <string name="allow">允许</string>
-    <string name="deny">拒绝</string>
-    <string name="remember_device">记住此设备</string>
+    <string name="connect_request">Cast request</string>
+    <string name="allow">Allow</string>
+    <string name="deny">Deny</string>
+    <string name="remember_device">Remember this device</string>
 
     <!-- 播放页面 -->
-    <string name="connected">已连接</string>
-    <string name="playing">正在播放</string>
-    <string name="disconnect">断开连接</string>
-    <string name="pause">暂停</string>
-    <string name="resume">继续</string>
+    <string name="connected">Connected</string>
+    <string name="playing">Playing</string>
+    <string name="status_paused">Paused</string>
+    <string name="status_buffering">Buffering…</string>
+    <string name="status_finished">Playback finished</string>
+    <string name="status_playback_error">Playback error</string>
+    <string name="error_playback_detail">Playback error: %s</string>
+    <string name="error_unknown">Unknown error</string>
+    <string name="status_speed">Playback speed: %s</string>
+    <string name="status_quality">Quality: %s</string>
+    <string name="title_dlna">DLNA cast</string>
+    <string name="title_dlna_indexed">DLNA cast %1$d/%2$d</string>
+    <string name="title_iphone_mirror">iPhone Screen Mirroring</string>
+    <string name="title_windows_display">Windows Wireless Display</string>
+    <string name="status_waiting_airplay">Waiting for AirPlay picture…</string>
+    <string name="status_waiting_windows">Waiting for Windows picture…</string>
+    <string name="status_receiving_iphone">Receiving iPhone screen…</string>
+    <string name="status_receiving_windows">Receiving Windows screen…</string>
+    <string name="status_showing_image">Showing image</string>
+    <string name="status_image_error">Image load error</string>
+    <string name="error_image_detail">Image load error: %s</string>
+    <string name="error_image_decode">Unable to decode image</string>
+    <string name="status_slideshow_paused">Slideshow paused</string>
 
-    <!-- 设置 -->
-    <string name="settings">设置</string>
-    <string name="device_name_setting">设备名称</string>
-    <string name="require_confirmation">需要连接确认</string>
-    <string name="enable_pin">启用 PIN 码</string>
-    <string name="max_resolution">最大分辨率</string>
-    <string name="max_framerate">最大帧率</string>
-    <string name="auto_start_on_boot">开机自动启动接收服务</string>
-    <string name="auto_start_on_boot_hint">电视开机后在后台自动运行，无需手动打开本应用。部分电视需要在系统设置里允许本应用自启动。</string>
-    <string name="network_diagnostics">网络诊断</string>
-    <string name="export_logs">导出日志</string>
+    <!-- 「更多」菜单 -->
+    <string name="more">More</string>
+    <string name="menu_stream_info">Video info</string>
+    <string name="menu_stream_info_hide">Hide video info</string>
+    <string name="menu_quality">Quality</string>
+    <string name="menu_speed">Playback speed (%s)</string>
+    <string name="menu_subtitles">Subtitles</string>
+    <string name="subtitles_auto">Subtitles follow the media\'s subtitle tracks automatically</string>
+    <string name="quality_title">Select quality</string>
+    <string name="quality_auto">Auto</string>
+    <string name="quality_480">Smooth 480p</string>
+    <string name="quality_720">HD 720p</string>
+    <string name="quality_1080">Full HD 1080p</string>
+    <string name="quality_original">Original</string>
+    <string name="speed_title">Playback speed</string>
 
-    <!-- 错误消息 -->
-    <string name="error_network">网络错误</string>
-    <string name="error_connection_failed">连接失败</string>
-    <string name="error_playback">播放错误</string>
-    <string name="error_unknown">未知错误</string>
+    <!-- 视频信息面板 -->
+    <string name="info_title">Video info</string>
+    <string name="info_source_resolution">Source resolution</string>
+    <string name="info_display_resolution">Display resolution</string>
+    <string name="info_codec">Video codec</string>
+    <string name="info_frame_rate">Frame rate</string>
+    <string name="info_bitrate">Bitrate</string>
+    <string name="info_network_speed">Network speed</string>
+
+    <!-- 控制条无障碍描述 -->
+    <string name="cd_cast_image">Cast image</string>
+    <string name="cd_rotate_screen">Rotate screen</string>
+    <string name="cd_previous">Previous</string>
+    <string name="cd_rewind">Rewind</string>
+    <string name="cd_play_pause">Play/Pause</string>
+    <string name="cd_fast_forward">Fast forward</string>
+    <string name="cd_next">Next</string>
+
+    <!-- 前台服务通知 -->
+    <string name="notification_channel_name">Cast receiver service</string>
+    <string name="notification_channel_description">Keeps the cast receiver service running</string>
+    <string name="notification_waiting">Waiting for AirPlay / DLNA / Miracast connections</string>
+    <string name="notification_stop_cast">Stop casting</string>
+    <string name="castplus_enable">Huawei Cast+ receiver (experimental)</string>
+    <string name="castplus_off">Cast+ is off. Enable it to test wireless projection from a Huawei phone.</string>
+    <string name="castplus_unsupported">Cast+ requires Android 6 or later and an ARM device.</string>
+    <string name="castplus_permission">Cast+ needs Location and, on Android 13+, Nearby devices permission. Grant them and reopen the app.</string>
+    <string name="castplus_starting">Starting Cast+ receiver…</string>
+    <string name="castplus_ready">Cast+ receiver ready. On the Huawei phone, open wireless projection.</string>
+    <string name="castplus_pairing">Cast+ is waiting for connection confirmation or a PIN.</string>
+    <string name="castplus_connecting">Connecting to the Huawei phone…</string>
+    <string name="castplus_playing">Huawei Cast+ is displaying the phone screen.</string>
+    <string name="castplus_paused">Huawei Cast+ is paused.</string>
+    <string name="castplus_disconnecting">Disconnecting Huawei Cast+…</string>
+    <string name="castplus_error">Cast+ could not start or the connection failed. Turn Cast+ off and on to retry; include receiver ADB logs if it still fails.</string>
+    <string name="castplus_request">%1$s wants to connect using Huawei Cast+.</string>
+    <string name="castplus_pin">Enter this PIN on the phone: %1$s</string>
+    <string name="castplus_exit">Stop casting</string>
+
+    <!-- Receiver status and AirPlay controls -->
+    <string name="receiver_default_name">Living room TV</string>
+    <string name="subtitles_follow_sender">Choose subtitles on the sending device.</string>
 </resources>
