@@ -1432,22 +1432,24 @@ class PlayerActivity : AppCompatActivity() {
 
     /**
      * 加载圆圈显示期间，每 [LOADING_SPEED_INTERVAL_MS] 采样一次 ExoPlayer 的累计下载
-     * 字节数并差分出真实加载速率，显示在圆圈正下方。没有可统计的下载（如本地图片）
-     * 时保持隐藏，不显示占位符。
+     * 字节数并差分出真实加载速率，显示在圆圈正下方；没有可统计的下载时显示 0 KB/s。
      */
     private fun startLoadingSpeedUpdates() {
         loadingSpeedTracker.reset()
-        tvLoadingSpeed.visibility = View.GONE
+        // 加载一开始就显示 0 KB/s，等首次采样（500ms 后）再刷新为真实速率
+        tvLoadingSpeed.text = "0 KB/s"
+        tvLoadingSpeed.visibility = View.VISIBLE
         loadingSpeedJob?.cancel()
         loadingSpeedJob = lifecycleScope.launch {
             while (isActive) {
                 delay(LOADING_SPEED_INTERVAL_MS)
                 val sample = loadingSpeedTracker.sample(loadedBytesTotal, 0L)
-                // 复用信息面板的格式化：≥1 MiB/s 用 MB/s 一位小数，否则 KB/s 整数，
-                // 低速（不足 1 KB/s）时继续隐藏，避免显示没有意义的 0 KB/s。
-                if (sample.bytesPerSec >= 1024) {
-                    tvLoadingSpeed.text = StreamInfoTracker.formatSpeed(sample.bytesPerSec)
-                    tvLoadingSpeed.visibility = View.VISIBLE
+                // 复用信息面板的格式化：≥1 MiB/s 用 MB/s 一位小数，否则 KB/s 整数；
+                // 速度为 0 时 formatSpeed 会返回占位符，这里固定显示 0 KB/s。
+                tvLoadingSpeed.text = if (sample.bytesPerSec > 0) {
+                    StreamInfoTracker.formatSpeed(sample.bytesPerSec)
+                } else {
+                    "0 KB/s"
                 }
             }
         }
