@@ -1446,9 +1446,8 @@ class PlayerActivity : AppCompatActivity() {
      */
     private fun startLoadingSpeedUpdates() {
         loadingSpeedTracker.reset()
-        // 加载一开始就显示 0 KB/s，等首次采样（500ms 后）再刷新为真实速率
-        tvLoadingSpeed.text = "0 KB/s"
-        tvLoadingSpeed.visibility = View.VISIBLE
+        // 首次采样完成前保持隐藏，避免刚进入加载就先闪一下 0 KB/s
+        tvLoadingSpeed.visibility = View.GONE
         loadingSpeedJob?.cancel()
         loadingSpeedJob = lifecycleScope.launch {
             while (isActive) {
@@ -1461,6 +1460,7 @@ class PlayerActivity : AppCompatActivity() {
                 } else {
                     "0 KB/s"
                 }
+                tvLoadingSpeed.visibility = View.VISIBLE
             }
         }
     }
