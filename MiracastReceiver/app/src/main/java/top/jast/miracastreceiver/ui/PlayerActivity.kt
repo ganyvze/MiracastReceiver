@@ -139,6 +139,9 @@ class PlayerActivity : AppCompatActivity() {
         /** 加载圆圈下方的速度刷新间隔 */
         private const val LOADING_SPEED_INTERVAL_MS = 500L
 
+        /** 加载速度文字与圆圈底部的间距 */
+        private const val LOADING_SPEED_GAP_DP = 8f
+
         private const val ACTION_PLAYBACK_STOPPED = "top.jast.miracastreceiver.ACTION_PLAYBACK_STOPPED"
 
         private const val ACTION_DISCONNECT_SENDER = "top.jast.miracastreceiver.DISCONNECT_SENDER"
@@ -365,6 +368,13 @@ class PlayerActivity : AppCompatActivity() {
         tvStreamInfo = findViewById(R.id.tv_stream_info)
         bufferingIndicator = findViewById(R.id.buffering_indicator)
         tvLoadingSpeed = findViewById(R.id.tv_loading_speed)
+        // 速度文字与圆圈同为居中约束，用 translationY 下移到圆圈正下方；
+        // 它不参与圆圈布局，圆圈尺寸与居中位置保持原状。
+        tvLoadingSpeed.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val gapPx = LOADING_SPEED_GAP_DP * resources.displayMetrics.density
+            tvLoadingSpeed.translationY =
+                progressBar.height / 2f + gapPx + tvLoadingSpeed.height / 2f
+        }
         speedIndicator = findViewById(R.id.tv_speed_indicator)
         previewFrameBox = findViewById(R.id.preview_frame_box)
         previewFrameImage = findViewById(R.id.preview_frame_image)
