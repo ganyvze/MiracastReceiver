@@ -11,6 +11,7 @@ import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.graphics.Bitmap
 import android.graphics.RectF
+import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -119,9 +120,18 @@ class PlayerActivity : AppCompatActivity() {
         private const val IMAGE_SLIDE_INTERVAL_MS = 5_000L
         private const val QUALITY_AUTO = -1
 
-        // Kodi 风格连续快进快退：短时间内连续按键会加大跳转步长
-        private const val SEEK_COMMIT_DELAY_MS = 500L
-        private val SEEK_STEP_TABLE_MS = longArrayOf(10_000L, 30_000L, 60_000L, 120_000L, 300_000L)
+        /** 预览进度模式：最后一次按键后多久自动完成跳转 */
+        private const val PREVIEW_IDLE_COMMIT_MS = 1_000L
+
+        /** 进度预览框宽度 */
+        private const val PREVIEW_BOX_WIDTH_DP = 220
+
+        /** 进度预览框高度范围：竖屏片源也不至于占掉半屏 */
+        private const val PREVIEW_BOX_MIN_HEIGHT_DP = 96
+        private const val PREVIEW_BOX_MAX_HEIGHT_DP = 150
+
+        /** 预览帧缓存数量（当前帧 + 预取帧），超出后回收最旧的位图 */
+        private const val PREVIEW_FRAME_CACHE_SIZE = 4
 
         private const val ACTION_PLAYBACK_STOPPED = "top.jast.miracastreceiver.ACTION_PLAYBACK_STOPPED"
 
@@ -205,10 +215,20 @@ class PlayerActivity : AppCompatActivity() {
     private var isStreamInfoVisible = false
     private var bandwidthEstimateBps = 0L
 
-    // Kodi 风格连续快进快退状态
-    private var pendingSeekDeltaMs = 0L
-    private var pendingSeekBasePositionMs: Long? = null
-    private var seekCommitJob: Job? = null
+    // 预览进度模式：按方向键只移动进度条和预览框，播放器继续从原位置播放；
+    // 按 OK 或 1 秒无按键后才真正跳到所选位置。
+    private var previewPositionMs: Long? = null
+    private var previewStepMs = 0L
+    private var previewIdleJob: Job? = null
+    private var previewFrameJob: Job? = null
+    private var previewPrefetchJob: Job? = null
+    private var previewFrameSeq = 0
+    private var isSeekKeyDown = false
+    private lateinit var previewFrameBox: FrameLayout
+    private lateinit var previewFrameImage: ImageView
+    private var previewShownBitmap: Bitmap? = null
+    private val previewFrameCache = LinkedHashMap<Long, Bitmap>(PREVIEW_FRAME_CACHE_SIZE, 0.75f, true)
+
     private var isDialogShowing = false
     private var okLongPressJob: Job? = null
     private var isLongPressSpeedActive = false
@@ -328,12 +348,14 @@ class PlayerActivity : AppCompatActivity() {
         tvStreamInfo = findViewById(R.id.tv_stream_info)
         bufferingIndicator = findViewById(R.id.buffering_indicator)
         speedIndicator = findViewById(R.id.tv_speed_indicator)
+        previewFrameBox = findViewById(R.id.preview_frame_box)
+        previewFrameImage = findViewById(R.id.preview_frame_image)
 
-        // 控制条播放中会周期性（约每秒）用真实播放位置刷新进度条。快进/快退预览期间
-        // 必须在该回调里同步把预览位置写回去（同一帧内完成），否则进度条会闪回旧位置。
+        // 控制条播放中会周期性（约每秒）用真实播放位置刷新进度条。预览进度模式下
+        // 必须在该回调里同步把预览位置写回去（同一帧内完成），否则进度条会跟着播放走动。
         playerView.findViewById<PlayerControlView?>(androidx.media3.ui.R.id.exo_controller)
             ?.setProgressUpdateListener { _, _ ->
-                if (pendingSeekBasePositionMs != null) previewPendingSeek()
+                if (previewPositionMs != null) renderPreviewPosition()
             }
         btnRotateOverlay = findViewById(R.id.btn_rotate_overlay)
         btnRotateOverlay.setOnClickListener {
@@ -518,58 +540,270 @@ class PlayerActivity : AppCompatActivity() {
         if (speed == 1f) "1.0x" else "${speed}x"
 
     /**
-     * 每次按键按用户设置的秒数或媒体总时长比例跳转。
+     * 按左/右键进入「预览进度模式」：只把进度条和预览框移到目标位置，播放器不 seek，
+     * 画面继续从原位置播放。按 OK 或 1 秒无按键后才真正跳到所选位置。
      *
      * @param multiplier 长按加速时的步进倍数（1 表示正常单击）
      */
     private fun handleSeekPress(forward: Boolean, multiplier: Int = 1) {
         val currentPlayer = player ?: return
-        if (isCurrentImage()) return
-        if (pendingSeekBasePositionMs == null) pendingSeekBasePositionMs = currentPlayer.currentPosition
+        if (!canPreviewSeek()) return
+        val duration = currentPlayer.duration.takeIf { it > 0 } ?: return
+        val base = previewPositionMs ?: currentPlayer.currentPosition
         val configuredValue = if (forward) AppSettings.getForwardValue(this) else AppSettings.getRewindValue(this)
-        val duration = player?.duration?.takeIf { it > 0 } ?: 0L
-        val baseStep = if (AppSettings.isSeekByPercent(this) && duration > 0) {
+        val baseStep = if (AppSettings.isSeekByPercent(this)) {
             (duration * configuredValue / 100f).toLong()
         } else {
             (configuredValue * 1000).toLong()
         }
-        val step = baseStep * multiplier
-        pendingSeekDeltaMs += if (forward) step else -step
-
-        previewPendingSeek()
-
-        seekCommitJob?.cancel()
-        seekCommitJob = lifecycleScope.launch {
-            delay(SEEK_COMMIT_DELAY_MS)
-            commitPendingSeek()
-        }
+        if (baseStep <= 0) return
+        previewStepMs = baseStep * multiplier
+        val target = (base + if (forward) previewStepMs else -previewStepMs).coerceIn(0L, duration)
+        previewPositionMs = target
+        renderPreviewPosition()
+        schedulePreviewCommit()
+        requestPreviewFrame(target)
     }
 
-    private fun previewPendingSeek() {
-        val currentPlayer = player ?: return
-        val duration = currentPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
-        val target = ((pendingSeekBasePositionMs ?: currentPlayer.currentPosition) + pendingSeekDeltaMs).coerceIn(0L, duration)
-        // 仅更新控制栏显示，实际播放器仍在延迟提交时才 seek，避免连续按键反复缓冲。
+    /** 只有可 seek 的点播内容才启用预览进度；镜像/直播流既不跳转也不弹任何提示。 */
+    private fun canPreviewSeek(): Boolean {
+        if (isMirrorSession() || isCurrentImage()) return false
+        val currentPlayer = player ?: return false
+        if (currentPlayer.currentMediaItem == null) return false
+        if (currentPlayer.duration <= 0) return false
+        return currentPlayer.isCurrentMediaItemSeekable
+    }
+
+    /** 把进度条、时间文字和预览框统一画到 [previewPositionMs] 所指位置。 */
+    private fun renderPreviewPosition() {
+        val target = previewPositionMs ?: return
         (playerView.findViewById<View?>(R.id.exo_progress) as? TimeBar)?.setPosition(target)
         playerView.findViewById<TextView?>(R.id.exo_position)?.text = formatTimeMs(target)
-        val sign = if (pendingSeekDeltaMs >= 0) "+" else "-"
-        val deltaSeconds = kotlin.math.abs(pendingSeekDeltaMs) / 1000
-        tvStatus.text = "${sign}${deltaSeconds}s  ${formatTimeMs(target)}"
         playerView.showController()
+        positionPreviewFrameBox(target)
     }
 
-    private fun commitPendingSeek() {
-        val currentPlayer = player ?: return
-        if (pendingSeekDeltaMs == 0L) {
-            pendingSeekBasePositionMs = null
+    /** 每次按键都重新计时；按键仍按着时不提交，等抬起后再从 1 秒重新计时。 */
+    private fun schedulePreviewCommit() {
+        previewIdleJob?.cancel()
+        previewIdleJob = lifecycleScope.launch {
+            delay(PREVIEW_IDLE_COMMIT_MS)
+            if (isSeekKeyDown) return@launch
+            commitPreviewSeek()
+        }
+    }
+
+    /** 退出预览进度并从进度条所选位置开始播放。 */
+    private fun commitPreviewSeek() {
+        val target = previewPositionMs ?: return
+        previewPositionMs = null
+        previewIdleJob?.cancel()
+        previewIdleJob = null
+        player?.seekTo(target)
+        hidePreviewFrameBox()
+        clearPreviewFrameCache()
+        reportPlaybackPosition()
+    }
+
+    /** 放弃预览（切源/退出投屏/退到后台）：不跳转，清掉所有取帧资源。 */
+    private fun cancelPreviewSeek() {
+        isSeekKeyDown = false
+        previewPositionMs = null
+        previewStepMs = 0L
+        previewIdleJob?.cancel()
+        previewIdleJob = null
+        previewFrameJob?.cancel()
+        previewFrameJob = null
+        previewPrefetchJob?.cancel()
+        previewPrefetchJob = null
+        previewFrameSeq++
+        hidePreviewFrameBox()
+        clearPreviewFrameCache()
+    }
+
+    /** 松开方向键：如果预览模式还在，从此刻开始 1 秒后自动完成跳转。 */
+    private fun onSeekKeyReleased() {
+        isSeekKeyDown = false
+        if (previewPositionMs != null) schedulePreviewCommit()
+    }
+
+    // ─── 预览帧与预览框 ────────────────────────────────────────────────────
+
+    /** 预览框宽度固定、高度按视频比例换算，悬浮在进度条所选位置的正上方。 */
+    private fun positionPreviewFrameBox(target: Long) {
+        val bar = playerView.findViewById<View?>(R.id.exo_progress) ?: return
+        val duration = player?.duration?.takeIf { it > 0 } ?: return
+        val root = findViewById<View>(android.R.id.content) ?: return
+        if (bar.width <= 0 || root.width <= 0) return
+        updatePreviewBoxSize()
+        val boxWidth = previewFrameBox.layoutParams.width
+        val boxHeight = previewFrameBox.layoutParams.height
+        if (boxWidth <= 0 || boxHeight <= 0) return
+        val fraction = (target.toFloat() / duration).coerceIn(0f, 1f)
+        val barLocation = IntArray(2).also(bar::getLocationOnScreen)
+        val rootLocation = IntArray(2).also(root::getLocationOnScreen)
+        val margin = dp(8)
+        val centerX = barLocation[0] - rootLocation[0] + (bar.width * fraction).toInt()
+        val maxLeft = (root.width - boxWidth - margin).coerceAtLeast(margin)
+        previewFrameBox.x = (centerX - boxWidth / 2).coerceIn(margin, maxLeft).toFloat()
+        previewFrameBox.y = (barLocation[1] - rootLocation[1] - boxHeight - margin).toFloat()
+    }
+
+    private fun updatePreviewBoxSize() {
+        val size = player?.videoSize
+        val aspect = if (size != null && size.width > 0 && size.height > 0) {
+            size.width.toFloat() / size.height.toFloat()
+        } else {
+            16f / 9f
+        }
+        val width = dp(PREVIEW_BOX_WIDTH_DP)
+        val height = (width / aspect).toInt()
+            .coerceIn(dp(PREVIEW_BOX_MIN_HEIGHT_DP), dp(PREVIEW_BOX_MAX_HEIGHT_DP))
+        val params = previewFrameBox.layoutParams
+        if (params.width != width || params.height != height) {
+            params.width = width
+            params.height = height
+            previewFrameBox.layoutParams = params
+        }
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    /**
+     * 取目标位置那一帧。命中预取缓存就直接显示，否则后台解码后显示并继续预取。
+     * 取不到帧时只把预览框藏起来，不弹任何提示。
+     */
+    private fun requestPreviewFrame(positionMs: Long) {
+        val uri = mediaUri ?: run { hidePreviewFrameBox(); return }
+        if (!canExtractPreviewFrame(uri)) {
+            hidePreviewFrameBox()
             return
         }
-        val duration = currentPlayer.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
-        val target = ((pendingSeekBasePositionMs ?: currentPlayer.currentPosition) + pendingSeekDeltaMs).coerceIn(0L, duration)
-        currentPlayer.seekTo(target)
-        pendingSeekDeltaMs = 0L
-        pendingSeekBasePositionMs = null
-        reportPlaybackPosition()
+        previewFrameJob?.cancel()
+        previewPrefetchJob?.cancel()
+        previewFrameCache[positionMs]?.let { cached ->
+            showPreviewFrame(cached)
+            prefetchPreviewFrames(positionMs)
+            return
+        }
+        previewFrameSeq++
+        val seq = previewFrameSeq
+        previewFrameJob = lifecycleScope.launch {
+            val bitmap = withContext(Dispatchers.IO) {
+                runCatching { loadPreviewFrame(uri, positionMs) }.getOrNull()
+            }
+            if (!isActive || seq != previewFrameSeq || previewPositionMs == null) {
+                bitmap?.recycle()
+                return@launch
+            }
+            if (bitmap == null) {
+                hidePreviewFrameBox()
+                return@launch
+            }
+            cachePreviewFrame(positionMs, bitmap)
+            showPreviewFrame(bitmap)
+            prefetchPreviewFrames(positionMs)
+        }
+    }
+
+    /** HLS 等取不到单帧的容器不做预览，避免出现一个无意义的空框。 */
+    private fun canExtractPreviewFrame(uri: String): Boolean =
+        !uri.contains(".m3u8", ignoreCase = true) &&
+            (uri.startsWith("http://") || uri.startsWith("https://") ||
+                uri.startsWith("content://") || uri.startsWith("file://"))
+
+    /**
+     * 后台解码关键帧。每次取帧都在 IO 线程里独立创建并释放 retriever，不和其它
+     * 协程共享句柄，避免连续按键时互相踩到已释放的资源。API 27+ 直接解成预览框
+     * 大小，避免为一个小窗分配整帧大图（4K 片源单帧就有数十 MB）。
+     */
+    private fun loadPreviewFrame(uri: String, positionMs: Long): Bitmap? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            if (uri.startsWith("http://") || uri.startsWith("https://")) {
+                retriever.setDataSource(uri, emptyMap<String, String>())
+            } else {
+                retriever.setDataSource(this, Uri.parse(uri))
+            }
+            val timeUs = positionMs * 1000
+            if (Build.VERSION.SDK_INT >= 27) {
+                val params = previewFrameBox.layoutParams
+                retriever.getScaledFrameAtTime(
+                    timeUs,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    params.width.coerceAtLeast(1),
+                    params.height.coerceAtLeast(1)
+                )
+            } else {
+                retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            }
+        } catch (t: Throwable) {
+            Timber.w(t, "Preview frame extraction failed at $positionMs ms")
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun showPreviewFrame(bitmap: Bitmap) {
+        previewShownBitmap = bitmap
+        previewFrameImage.setImageBitmap(bitmap)
+        previewFrameBox.visibility = View.VISIBLE
+        previewPositionMs?.let { positionPreviewFrameBox(it) }
+    }
+
+    private fun hidePreviewFrameBox() {
+        previewFrameBox.visibility = View.GONE
+        previewFrameImage.setImageDrawable(null)
+        previewShownBitmap = null
+    }
+
+    /**
+     * 预取下一次按键最可能落到的两个位置（继续同向一步、反向一步），让连续按键时
+     * 预览框可以立即切换。缓存只保留最近几帧，被淘汰的位图及时回收。
+     */
+    private fun prefetchPreviewFrames(fromMs: Long) {
+        val uri = mediaUri ?: return
+        val duration = player?.duration?.takeIf { it > 0 } ?: return
+        val step = previewStepMs
+        if (step <= 0 || !canExtractPreviewFrame(uri)) return
+        val targets = listOf(fromMs + step, fromMs - step)
+            .map { it.coerceIn(0L, duration) }
+            .filter { it != fromMs && !previewFrameCache.containsKey(it) }
+            .distinct()
+        if (targets.isEmpty()) return
+        previewPrefetchJob?.cancel()
+        previewPrefetchJob = lifecycleScope.launch {
+            targets.forEach { target ->
+                if (!isActive || previewPositionMs == null) return@launch
+                val bitmap = withContext(Dispatchers.IO) {
+                    runCatching { loadPreviewFrame(uri, target) }.getOrNull()
+                } ?: return@forEach
+                if (!isActive || previewPositionMs == null) {
+                    bitmap.recycle()
+                    return@launch
+                }
+                cachePreviewFrame(target, bitmap)
+            }
+        }
+    }
+
+    private fun cachePreviewFrame(positionMs: Long, bitmap: Bitmap) {
+        synchronized(previewFrameCache) {
+            previewFrameCache[positionMs] = bitmap
+            while (previewFrameCache.size > PREVIEW_FRAME_CACHE_SIZE) {
+                val oldest = previewFrameCache.keys.firstOrNull() ?: break
+                val removed = previewFrameCache.remove(oldest)
+                if (removed != null && removed !== previewShownBitmap) removed.recycle()
+            }
+        }
+    }
+
+    private fun clearPreviewFrameCache() {
+        synchronized(previewFrameCache) {
+            previewFrameCache.values.forEach { if (it !== previewShownBitmap) it.recycle() }
+            previewFrameCache.clear()
+        }
     }
 
     private fun formatTimeMs(ms: Long): String {
@@ -595,9 +829,9 @@ class PlayerActivity : AppCompatActivity() {
         val isOkKey = event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER
         if (isOkKey && !isCurrentImage() && !isDialogShowing && player != null) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                if (pendingSeekDeltaMs != 0L) {
-                    seekCommitJob?.cancel()
-                    commitPendingSeek()
+                // 预览进度模式下按 OK：从进度条所选位置开始播放
+                if (previewPositionMs != null) {
+                    commitPreviewSeek()
                     okPressCommittedSeek = true
                     return true
                 }
@@ -653,6 +887,7 @@ class PlayerActivity : AppCompatActivity() {
         if ((isForwardKey || isRewindKey) && !isCurrentImage() && !isDialogShowing && player != null) {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 if (event.repeatCount == 0) {
+                    isSeekKeyDown = true
                     handleSeekPress(forward = isForwardKey)
                     startSeekRepeatAcceleration(forward = isForwardKey)
                 }
@@ -661,6 +896,7 @@ class PlayerActivity : AppCompatActivity() {
             }
             if (event.action == KeyEvent.ACTION_UP) {
                 finishSeekRepeatAcceleration()
+                onSeekKeyReleased()
                 return true
             }
         }
@@ -722,7 +958,7 @@ class PlayerActivity : AppCompatActivity() {
      * 按比例跳转模式下不启用，等同于普通单击，也不做任何提示。
      */
     private fun startSeekRepeatAcceleration(forward: Boolean) {
-        if (AppSettings.isSeekByPercent(this)) return
+        if (AppSettings.isSeekByPercent(this) || !canPreviewSeek()) return
         seekAccelJob?.cancel()
         seekAccelJob = lifecycleScope.launch {
             var multiplier = 1
@@ -741,6 +977,8 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        // 换源/换会话时先丢掉上一个内容的预览状态与位图
+        cancelPreviewSeek()
         findViewById<SubtitleView>(R.id.airplay_subtitles).apply {
             setCues(emptyList())
             visibility = View.GONE
@@ -1618,8 +1856,9 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         isPlayerVisible = false
-        // 退到后台时收不到按键抬起事件，这里兜底清掉长按跳转加速状态
+        // 退到后台时收不到按键抬起事件，这里兜底清掉长按跳转加速和预览进度状态
         finishSeekRepeatAcceleration()
+        cancelPreviewSeek()
         okLongPressJob?.cancel()
         updateScreenOn()
         super.onStop()
@@ -1645,6 +1884,7 @@ class PlayerActivity : AppCompatActivity() {
     private fun stopPlayback(endCastSession: Boolean = false) {
         screenOnSessionActive = false
         finishSeekRepeatAcceleration()
+        cancelPreviewSeek()
         stopImageSlideShow()
         stopProgressUpdates()
         mirrorAspectJob?.cancel()
@@ -1730,6 +1970,9 @@ class PlayerActivity : AppCompatActivity() {
         screenOnSessionActive = false
         isPlayerVisible = false
         cropSession++ // 丢弃退出前尚未返回的取帧结果。
+        seekAccelJob?.cancel()
+        seekAccelJob = null
+        cancelPreviewSeek()
         super.onDestroy()
         try {
             unregisterReceiver(controlReceiver)

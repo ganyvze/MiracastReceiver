@@ -149,6 +149,24 @@
         tools:text="5.0倍速中"
         tools:visibility="visible" />
 
+    <!-- 预览进度模式的画面预览框：悬浮在进度条所选位置的正上方，显示该位置那一帧 -->
+    <FrameLayout
+        android:id="@+id/preview_frame_box"
+        android:layout_width="220dp"
+        android:layout_height="124dp"
+        android:background="@drawable/bg_seek_preview_frame"
+        android:clipToOutline="true"
+        android:padding="2dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/preview_frame_image"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter" />
+    </FrameLayout>
+
     <!-- 错误提示 -->
     <TextView
         android:id="@+id/tv_error"
