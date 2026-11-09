@@ -1443,11 +1443,10 @@ class PlayerActivity : AppCompatActivity() {
             while (isActive) {
                 delay(LOADING_SPEED_INTERVAL_MS)
                 val sample = loadingSpeedTracker.sample(loadedBytesTotal, 0L)
-                if (sample.bytesPerSec > 0) {
-                    // 只显示数值：MB/s，固定两位小数，避免宽度跳动
-                    tvLoadingSpeed.text = String.format(
-                        "%.2f", sample.bytesPerSec / (1024.0 * 1024.0)
-                    )
+                // 复用信息面板的格式化：≥1 MiB/s 用 MB/s 一位小数，否则 KB/s 整数，
+                // 低速（不足 1 KB/s）时继续隐藏，避免显示没有意义的 0 KB/s。
+                if (sample.bytesPerSec >= 1024) {
+                    tvLoadingSpeed.text = StreamInfoTracker.formatSpeed(sample.bytesPerSec)
                     tvLoadingSpeed.visibility = View.VISIBLE
                 }
             }
