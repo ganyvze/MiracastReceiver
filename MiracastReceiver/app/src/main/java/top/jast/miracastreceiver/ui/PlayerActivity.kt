@@ -136,14 +136,11 @@ class PlayerActivity : AppCompatActivity() {
         /** 连按两次返回退出投屏的间隔上限 */
         private const val EXIT_BACK_INTERVAL_MS = 2_000L
 
-        /** 长按左/右键多久进入倍速加速 */
-        private const val SEEK_ACCEL_LONG_PRESS_MS = 500L
-
-        /** 加速过程中每隔多久把倍速翻一倍 */
+        /** 长按左/右键时，每隔多久把快进/快退步进值翻一倍 */
         private const val SEEK_ACCEL_STEP_MS = 2_000L
 
-        /** 加速上限 */
-        private const val SEEK_ACCEL_MAX_SPEED = 16f
+        /** 长按加速的步进上限（基础步进的 16 倍） */
+        private const val SEEK_ACCEL_MAX_MULTIPLIER = 16
     }
 
     private lateinit var playerView: PlayerView
@@ -217,9 +214,8 @@ class PlayerActivity : AppCompatActivity() {
     private var isLongPressSpeedActive = false
     private var okPressCommittedSeek = false
 
-    // 长按左/右键的倍速加速状态（和 OK 长按倍速各自独立，互不清理对方）
+    // 长按左/右键的步进加速状态（只影响跳转步进，不碰播放速率，与 OK 长按倍速无关）
     private var seekAccelJob: Job? = null
-    private var isSeekAccelActive = false
 
     // 连按两次返回退出投屏：记录第一次按下的时间，0 表示未处于待确认状态
     private var exitBackArmedAt = 0L
@@ -523,18 +519,21 @@ class PlayerActivity : AppCompatActivity() {
 
     /**
      * 每次按键按用户设置的秒数或媒体总时长比例跳转。
+     *
+     * @param multiplier 长按加速时的步进倍数（1 表示正常单击）
      */
-    private fun handleSeekPress(forward: Boolean) {
+    private fun handleSeekPress(forward: Boolean, multiplier: Int = 1) {
         val currentPlayer = player ?: return
         if (isCurrentImage()) return
         if (pendingSeekBasePositionMs == null) pendingSeekBasePositionMs = currentPlayer.currentPosition
         val configuredValue = if (forward) AppSettings.getForwardValue(this) else AppSettings.getRewindValue(this)
         val duration = player?.duration?.takeIf { it > 0 } ?: 0L
-        val step = if (AppSettings.isSeekByPercent(this) && duration > 0) {
+        val baseStep = if (AppSettings.isSeekByPercent(this) && duration > 0) {
             (duration * configuredValue / 100f).toLong()
         } else {
             (configuredValue * 1000).toLong()
         }
+        val step = baseStep * multiplier
         pendingSeekDeltaMs += if (forward) step else -step
 
         previewPendingSeek()
@@ -606,8 +605,6 @@ class PlayerActivity : AppCompatActivity() {
                 okLongPressJob?.cancel()
                 okLongPressJob = lifecycleScope.launch {
                     delay(500)
-                    // 左/右键加速已经开始时不要叠加，避免两套倍速互相覆盖
-                    if (isSeekAccelActive) return@launch
                     val speed = AppSettings.getLongPressSpeed(this@PlayerActivity)
                     player?.setPlaybackSpeed(speed)
                     isLongPressSpeedActive = true
@@ -657,13 +654,13 @@ class PlayerActivity : AppCompatActivity() {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 if (event.repeatCount == 0) {
                     handleSeekPress(forward = isForwardKey)
-                    startSeekAcceleration()
+                    startSeekRepeatAcceleration(forward = isForwardKey)
                 }
-                // 长按期间的重复事件不再累加跳转，避免和加速逻辑互相干扰
+                // 长按期间的重复事件不再累加跳转，改由加速任务按倍数重复执行
                 return true
             }
             if (event.action == KeyEvent.ACTION_UP) {
-                finishSeekAcceleration()
+                finishSeekRepeatAcceleration()
                 return true
             }
         }
@@ -719,44 +716,28 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     /**
-     * 长按左/右键进入倍速加速：从当前速度起步，每 2 秒翻倍，上限 16 倍。
+     * 长按左/右键：以设置里的快进/快退秒数为基础步进，按住期间每 2 秒把步进翻倍
+     * （上限 16 倍），并按当前步进值重复执行跳转。播放速率不受影响。
      *
-     * 与 OK 长按倍速互斥：OK 长按正在加速时不再叠加。
+     * 按比例跳转模式下不启用，等同于普通单击，也不做任何提示。
      */
-    private fun startSeekAcceleration() {
-        if (isLongPressSpeedActive) return
+    private fun startSeekRepeatAcceleration(forward: Boolean) {
+        if (AppSettings.isSeekByPercent(this)) return
         seekAccelJob?.cancel()
-        isSeekAccelActive = false
         seekAccelJob = lifecycleScope.launch {
-            delay(SEEK_ACCEL_LONG_PRESS_MS)
-            if (isLongPressSpeedActive) return@launch
-            isSeekAccelActive = true
-            var speed = currentSpeed.coerceIn(1f, SEEK_ACCEL_MAX_SPEED)
-            showSeekAccelerationSpeed(speed)
-            while (isActive && speed < SEEK_ACCEL_MAX_SPEED) {
+            var multiplier = 1
+            while (isActive) {
                 delay(SEEK_ACCEL_STEP_MS)
-                speed = (speed * 2f).coerceAtMost(SEEK_ACCEL_MAX_SPEED)
-                showSeekAccelerationSpeed(speed)
+                multiplier = (multiplier * 2).coerceAtMost(SEEK_ACCEL_MAX_MULTIPLIER)
+                handleSeekPress(forward = forward, multiplier = multiplier)
             }
         }
     }
 
-    private fun showSeekAccelerationSpeed(speed: Float) {
-        player?.setPlaybackSpeed(speed)
-        currentSpeed = speed
-        speedIndicator.text = String.format("%.0f倍速中", speed)
-        speedIndicator.visibility = View.VISIBLE
-    }
-
-    /** 松开按键：立即清除加速状态并恢复正常倍速。 */
-    private fun finishSeekAcceleration() {
+    /** 松开按键：立即停止重复跳转并清除累计倍数。 */
+    private fun finishSeekRepeatAcceleration() {
         seekAccelJob?.cancel()
         seekAccelJob = null
-        if (!isSeekAccelActive) return
-        isSeekAccelActive = false
-        player?.setPlaybackSpeed(1f)
-        currentSpeed = 1f
-        speedIndicator.visibility = View.GONE
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -1637,8 +1618,8 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         isPlayerVisible = false
-        // 退到后台时收不到按键抬起事件，这里兜底清掉长按加速状态
-        finishSeekAcceleration()
+        // 退到后台时收不到按键抬起事件，这里兜底清掉长按跳转加速状态
+        finishSeekRepeatAcceleration()
         okLongPressJob?.cancel()
         updateScreenOn()
         super.onStop()
@@ -1663,7 +1644,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun stopPlayback(endCastSession: Boolean = false) {
         screenOnSessionActive = false
-        finishSeekAcceleration()
+        finishSeekRepeatAcceleration()
         stopImageSlideShow()
         stopProgressUpdates()
         mirrorAspectJob?.cancel()
