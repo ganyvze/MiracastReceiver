@@ -125,11 +125,25 @@ class PlayerActivity : AppCompatActivity() {
 
         private const val ACTION_PLAYBACK_STOPPED = "top.jast.miracastreceiver.ACTION_PLAYBACK_STOPPED"
 
+        private const val ACTION_DISCONNECT_SENDER = "top.jast.miracastreceiver.DISCONNECT_SENDER"
+
         private const val ROTATE_BUTTON_HIDE_DELAY_MS = 4_000L
         private val ROTATE_REVEAL_KEYS = setOf(
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN
         )
+
+        /** 连按两次返回退出投屏的间隔上限 */
+        private const val EXIT_BACK_INTERVAL_MS = 2_000L
+
+        /** 长按左/右键多久进入倍速加速 */
+        private const val SEEK_ACCEL_LONG_PRESS_MS = 500L
+
+        /** 加速过程中每隔多久把倍速翻一倍 */
+        private const val SEEK_ACCEL_STEP_MS = 2_000L
+
+        /** 加速上限 */
+        private const val SEEK_ACCEL_MAX_SPEED = 16f
     }
 
     private lateinit var playerView: PlayerView
@@ -202,6 +216,13 @@ class PlayerActivity : AppCompatActivity() {
     private var okLongPressJob: Job? = null
     private var isLongPressSpeedActive = false
     private var okPressCommittedSeek = false
+
+    // 长按左/右键的倍速加速状态（和 OK 长按倍速各自独立，互不清理对方）
+    private var seekAccelJob: Job? = null
+    private var isSeekAccelActive = false
+
+    // 连按两次返回退出投屏：记录第一次按下的时间，0 表示未处于待确认状态
+    private var exitBackArmedAt = 0L
 
     private val controlReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -585,6 +606,8 @@ class PlayerActivity : AppCompatActivity() {
                 okLongPressJob?.cancel()
                 okLongPressJob = lifecycleScope.launch {
                     delay(500)
+                    // 左/右键加速已经开始时不要叠加，避免两套倍速互相覆盖
+                    if (isSeekAccelActive) return@launch
                     val speed = AppSettings.getLongPressSpeed(this@PlayerActivity)
                     player?.setPlaybackSpeed(speed)
                     isLongPressSpeedActive = true
@@ -620,9 +643,27 @@ class PlayerActivity : AppCompatActivity() {
                 showMoreMenu()
                 return true
             }
-            // 面板打开时返回键先关面板，不要直接结束播放
-            if (event.keyCode == KeyEvent.KEYCODE_BACK && isStreamInfoVisible) {
-                hideStreamInfo()
+            // 面板打开时返回键先关面板；否则连按两次才退出投屏
+            if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+                if (event.repeatCount == 0) return handleBackPressed()
+                return true
+            }
+        }
+        val isForwardKey = event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+            event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+        val isRewindKey = event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+            event.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND
+        if ((isForwardKey || isRewindKey) && !isCurrentImage() && !isDialogShowing && player != null) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                if (event.repeatCount == 0) {
+                    handleSeekPress(forward = isForwardKey)
+                    startSeekAcceleration()
+                }
+                // 长按期间的重复事件不再累加跳转，避免和加速逻辑互相干扰
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_UP) {
+                finishSeekAcceleration()
                 return true
             }
         }
@@ -635,17 +676,87 @@ class PlayerActivity : AppCompatActivity() {
                 playerView.showController()
                 return true
             }
-
-            val isForwardKey = event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
-                event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
-            val isRewindKey = event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
-                event.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND
-            if (isForwardKey || isRewindKey) {
-                handleSeekPress(forward = isForwardKey)
-                return true
-            }
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    /**
+     * 返回键：第一次只提示，2 秒内再按一次才真正退出投屏。
+     *
+     * @return 是否已消费该按键
+     */
+    private fun handleBackPressed(): Boolean {
+        if (isStreamInfoVisible) {
+            hideStreamInfo()
+            return true
+        }
+        val now = SystemClock.uptimeMillis()
+        if (exitBackArmedAt != 0L && now - exitBackArmedAt <= EXIT_BACK_INTERVAL_MS) {
+            exitBackArmedAt = 0L
+            exitCast()
+            return true
+        }
+        exitBackArmedAt = now
+        Toast.makeText(this, "再按一次返回退出投屏", Toast.LENGTH_SHORT).show()
+        return true
+    }
+
+    /** 用户主动退出：先断开当前投屏会话，再关界面，避免会话留在后台。 */
+    private fun exitCast() {
+        val disconnect = Intent(ACTION_DISCONNECT_SENDER).apply { setPackage(packageName) }
+        when {
+            isMiracastSession -> {
+                disconnect.putExtra("miracast", true)
+                sendBroadcast(disconnect)
+            }
+            isAirPlayMirrorSession -> {
+                disconnect.putExtra("miracast", false)
+                sendBroadcast(disconnect)
+            }
+        }
+        stopPlayback(endCastSession = true)
+        exitPlayer()
+    }
+
+    /**
+     * 长按左/右键进入倍速加速：从当前速度起步，每 2 秒翻倍，上限 16 倍。
+     *
+     * 与 OK 长按倍速互斥：OK 长按正在加速时不再叠加。
+     */
+    private fun startSeekAcceleration() {
+        if (isLongPressSpeedActive) return
+        seekAccelJob?.cancel()
+        isSeekAccelActive = false
+        seekAccelJob = lifecycleScope.launch {
+            delay(SEEK_ACCEL_LONG_PRESS_MS)
+            if (isLongPressSpeedActive) return@launch
+            isSeekAccelActive = true
+            var speed = currentSpeed.coerceIn(1f, SEEK_ACCEL_MAX_SPEED)
+            showSeekAccelerationSpeed(speed)
+            while (isActive && speed < SEEK_ACCEL_MAX_SPEED) {
+                delay(SEEK_ACCEL_STEP_MS)
+                speed = (speed * 2f).coerceAtMost(SEEK_ACCEL_MAX_SPEED)
+                showSeekAccelerationSpeed(speed)
+            }
+        }
+    }
+
+    private fun showSeekAccelerationSpeed(speed: Float) {
+        player?.setPlaybackSpeed(speed)
+        currentSpeed = speed
+        speedIndicator.text = String.format("%.0f倍速中", speed)
+        speedIndicator.visibility = View.VISIBLE
+    }
+
+    /** 松开按键：立即清除加速状态并恢复正常倍速。 */
+    private fun finishSeekAcceleration() {
+        seekAccelJob?.cancel()
+        seekAccelJob = null
+        if (!isSeekAccelActive) return
+        isSeekAccelActive = false
+        player?.setPlaybackSpeed(1f)
+        currentSpeed = 1f
+        speedIndicator.visibility = View.GONE
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -731,6 +842,9 @@ class PlayerActivity : AppCompatActivity() {
         Timber.i("Starting AirPlay mirror playback")
         isAirPlayMirrorSession = true
         isMiracastSession = false
+        // AirPlay 镜像由发送端决定画面方向，不再提供右下角旋转按钮
+        rotateButtonHideJob?.cancel()
+        btnRotateOverlay.visibility = View.GONE
         streamInfoTracker.reset()
         screenOnSessionActive = true
         updateScreenOn()
@@ -1465,8 +1579,8 @@ class PlayerActivity : AppCompatActivity() {
     }
 
 
-    /** 镜像和图片没有控制条，用浮动按钮旋转；点播视频的旋转按钮在控制条里。 */
-    private fun usesRotateOverlay() = isMirrorSession() || isCurrentImage()
+    /** Miracast 镜像和图片没有控制条，用浮动按钮旋转；AirPlay 镜像由发送端控制方向，不显示。 */
+    private fun usesRotateOverlay() = isMiracastSession || isCurrentImage()
 
     /** 呼出浮动旋转按钮，几秒无操作后自动隐藏。[focus] 为 true 时让遥控器焦点落在按钮上，按 OK 即可旋转。 */
     private fun showRotateButton(focus: Boolean) {
@@ -1523,6 +1637,9 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStop() {
         isPlayerVisible = false
+        // 退到后台时收不到按键抬起事件，这里兜底清掉长按加速状态
+        finishSeekAcceleration()
+        okLongPressJob?.cancel()
         updateScreenOn()
         super.onStop()
         if (isCurrentImage()) stopImageSlideShow() else player?.pause()
@@ -1546,6 +1663,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun stopPlayback(endCastSession: Boolean = false) {
         screenOnSessionActive = false
+        finishSeekAcceleration()
         stopImageSlideShow()
         stopProgressUpdates()
         mirrorAspectJob?.cancel()
@@ -1680,13 +1798,6 @@ class PlayerActivity : AppCompatActivity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (isMirrorSession()) {
-            sendBroadcast(Intent("top.jast.miracastreceiver.DISCONNECT_SENDER").apply {
-                setPackage(packageName)
-                putExtra("miracast", isMiracastSession)
-            })
-        }
-        stopPlayback(endCastSession = true)
-        exitPlayer()
+        handleBackPressed()
     }
 }
