@@ -136,6 +136,9 @@ class PlayerActivity : AppCompatActivity() {
         /** 连续按键时两次取帧的最小间隔，避免高频重复事件反复取消/新建解码任务 */
         private const val PREVIEW_FRAME_THROTTLE_MS = 250L
 
+        /** 加载圆圈下方的速度刷新间隔 */
+        private const val LOADING_SPEED_INTERVAL_MS = 500L
+
         private const val ACTION_PLAYBACK_STOPPED = "top.jast.miracastreceiver.ACTION_PLAYBACK_STOPPED"
 
         private const val ACTION_DISCONNECT_SENDER = "top.jast.miracastreceiver.DISCONNECT_SENDER"
@@ -166,6 +169,12 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var speedIndicator: TextView
     private lateinit var tvStreamInfo: TextView
     private lateinit var bufferingIndicator: ProgressBar
+    private lateinit var tvLoadingSpeed: TextView
+
+    // 加载速度：复用 StreamInfoTracker 把 ExoPlayer 的累计下载字节换算成速率
+    private val loadingSpeedTracker = StreamInfoTracker()
+    private var loadingSpeedJob: Job? = null
+    private var loadedBytesTotal = 0L
 
     private var player: ExoPlayer? = null
     private var castToken: String? = null
@@ -355,6 +364,7 @@ class PlayerActivity : AppCompatActivity() {
         tvError = findViewById(R.id.tv_error)
         tvStreamInfo = findViewById(R.id.tv_stream_info)
         bufferingIndicator = findViewById(R.id.buffering_indicator)
+        tvLoadingSpeed = findViewById(R.id.tv_loading_speed)
         speedIndicator = findViewById(R.id.tv_speed_indicator)
         previewFrameBox = findViewById(R.id.preview_frame_box)
         previewFrameImage = findViewById(R.id.preview_frame_image)
@@ -507,6 +517,7 @@ class PlayerActivity : AppCompatActivity() {
                         bitrateEstimate: Long
                     ) {
                         bandwidthEstimateBps = bitrateEstimate
+                        loadedBytesTotal = totalBytesLoaded
                     }
                 })
             }
@@ -1416,6 +1427,38 @@ class PlayerActivity : AppCompatActivity() {
     private fun updateBufferingState(isBuffering: Boolean) {
         progressBar.visibility = if (isBuffering) View.VISIBLE else View.GONE
         bufferingIndicator.visibility = if (isBuffering) View.VISIBLE else View.GONE
+        if (isBuffering) startLoadingSpeedUpdates() else stopLoadingSpeedUpdates()
+    }
+
+    /**
+     * 加载圆圈显示期间，每 [LOADING_SPEED_INTERVAL_MS] 采样一次 ExoPlayer 的累计下载
+     * 字节数并差分出真实加载速率，显示在圆圈正下方。没有可统计的下载（如本地图片）
+     * 时保持隐藏，不显示占位符。
+     */
+    private fun startLoadingSpeedUpdates() {
+        loadingSpeedTracker.reset()
+        tvLoadingSpeed.visibility = View.GONE
+        loadingSpeedJob?.cancel()
+        loadingSpeedJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(LOADING_SPEED_INTERVAL_MS)
+                val sample = loadingSpeedTracker.sample(loadedBytesTotal, 0L)
+                if (sample.bytesPerSec > 0) {
+                    // 只显示数值：MB/s，固定两位小数，避免宽度跳动
+                    tvLoadingSpeed.text = String.format(
+                        "%.2f", sample.bytesPerSec / (1024.0 * 1024.0)
+                    )
+                    tvLoadingSpeed.visibility = View.VISIBLE
+                }
+            }
+        }
+    }
+
+    /** 圆圈消失时同步隐藏加载速度，不残留文字。 */
+    private fun stopLoadingSpeedUpdates() {
+        loadingSpeedJob?.cancel()
+        loadingSpeedJob = null
+        tvLoadingSpeed.visibility = View.GONE
     }
 
     // ─── 视频流信息面板 ────────────────────────────────────────────────────
