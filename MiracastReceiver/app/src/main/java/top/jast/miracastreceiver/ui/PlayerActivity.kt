@@ -133,6 +133,9 @@ class PlayerActivity : AppCompatActivity() {
         /** 预览帧缓存数量（当前帧 + 预取帧），超出后回收最旧的位图 */
         private const val PREVIEW_FRAME_CACHE_SIZE = 4
 
+        /** 连续按键时两次取帧的最小间隔，避免高频重复事件反复取消/新建解码任务 */
+        private const val PREVIEW_FRAME_THROTTLE_MS = 250L
+
         private const val ACTION_PLAYBACK_STOPPED = "top.jast.miracastreceiver.ACTION_PLAYBACK_STOPPED"
 
         private const val ACTION_DISCONNECT_SENDER = "top.jast.miracastreceiver.DISCONNECT_SENDER"
@@ -222,6 +225,9 @@ class PlayerActivity : AppCompatActivity() {
     private var previewIdleJob: Job? = null
     private var previewFrameJob: Job? = null
     private var previewPrefetchJob: Job? = null
+    private var previewFrameThrottleJob: Job? = null
+    private var previewFrameThrottleAt = 0L
+    private var previewFramePendingMs = -1L
     private var previewFrameSeq = 0
     private var isSeekKeyDown = false
     private lateinit var previewFrameBox: FrameLayout
@@ -236,6 +242,8 @@ class PlayerActivity : AppCompatActivity() {
 
     // 长按左/右键的步进加速状态（只影响跳转步进，不碰播放速率，与 OK 长按倍速无关）
     private var seekAccelJob: Job? = null
+    /** 长按时的当前步进倍数：每次长按从 1 开始，每 2 秒翻倍，上限 16。 */
+    private var seekAccelMultiplier = 1
 
     // 连按两次返回退出投屏：记录第一次按下的时间，0 表示未处于待确认状态
     private var exitBackArmedAt = 0L
@@ -562,7 +570,7 @@ class PlayerActivity : AppCompatActivity() {
         previewPositionMs = target
         renderPreviewPosition()
         schedulePreviewCommit()
-        requestPreviewFrame(target)
+        schedulePreviewFrame(target)
     }
 
     /** 只有可 seek 的点播内容才启用预览进度；镜像/直播流既不跳转也不弹任何提示。 */
@@ -599,6 +607,9 @@ class PlayerActivity : AppCompatActivity() {
         previewPositionMs = null
         previewIdleJob?.cancel()
         previewIdleJob = null
+        previewFrameThrottleJob?.cancel()
+        previewFrameThrottleJob = null
+        previewFramePendingMs = -1L
         player?.seekTo(target)
         hidePreviewFrameBox()
         clearPreviewFrameCache()
@@ -610,12 +621,15 @@ class PlayerActivity : AppCompatActivity() {
         isSeekKeyDown = false
         previewPositionMs = null
         previewStepMs = 0L
+        previewFramePendingMs = -1L
         previewIdleJob?.cancel()
         previewIdleJob = null
         previewFrameJob?.cancel()
         previewFrameJob = null
         previewPrefetchJob?.cancel()
         previewPrefetchJob = null
+        previewFrameThrottleJob?.cancel()
+        previewFrameThrottleJob = null
         previewFrameSeq++
         hidePreviewFrameBox()
         clearPreviewFrameCache()
@@ -670,10 +684,35 @@ class PlayerActivity : AppCompatActivity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     /**
+     * 连续按键（尤其是长按的重复事件）时对取帧做节流：最多每
+     * [PREVIEW_FRAME_THROTTLE_MS] 取一次，期间只记住最后落点，窗口结束后再取那一帧。
+     * 否则每次重复事件都取消/新建解码任务，会拖慢进度条并堆积内存。
+     */
+    private fun schedulePreviewFrame(positionMs: Long) {
+        val now = SystemClock.uptimeMillis()
+        val elapsed = now - previewFrameThrottleAt
+        if (elapsed >= PREVIEW_FRAME_THROTTLE_MS) {
+            previewFrameThrottleAt = now
+            requestPreviewFrame(positionMs)
+            return
+        }
+        previewFramePendingMs = positionMs
+        if (previewFrameThrottleJob?.isActive == true) return
+        previewFrameThrottleJob = lifecycleScope.launch {
+            delay(PREVIEW_FRAME_THROTTLE_MS - elapsed)
+            val pending = previewFramePendingMs
+            previewFramePendingMs = -1L
+            previewFrameThrottleAt = SystemClock.uptimeMillis()
+            if (pending >= 0 && previewPositionMs != null) requestPreviewFrame(pending)
+        }
+    }
+
+    /**
      * 取目标位置那一帧。命中预取缓存就直接显示，否则后台解码后显示并继续预取。
      * 取不到帧时只把预览框藏起来，不弹任何提示。
      */
     private fun requestPreviewFrame(positionMs: Long) {
+        if (previewPositionMs == null) return
         val uri = mediaUri ?: run { hidePreviewFrameBox(); return }
         if (!canExtractPreviewFrame(uri)) {
             hidePreviewFrameBox()
@@ -888,10 +927,13 @@ class PlayerActivity : AppCompatActivity() {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 if (event.repeatCount == 0) {
                     isSeekKeyDown = true
+                    startSeekRepeatAcceleration()
                     handleSeekPress(forward = isForwardKey)
-                    startSeekRepeatAcceleration(forward = isForwardKey)
+                } else if (!AppSettings.isSeekByPercent(this)) {
+                    // 长按产生的重复事件每个都推进一次，倍数由 2 秒定时器单独翻倍。
+                    // 按比例模式下不加速，重复事件一律忽略，等同普通单击。
+                    handleSeekPress(forward = isForwardKey, multiplier = seekAccelMultiplier)
                 }
-                // 长按期间的重复事件不再累加跳转，改由加速任务按倍数重复执行
                 return true
             }
             if (event.action == KeyEvent.ACTION_UP) {
@@ -952,28 +994,29 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     /**
-     * 长按左/右键：以设置里的快进/快退秒数为基础步进，按住期间每 2 秒把步进翻倍
-     * （上限 16 倍），并按当前步进值重复执行跳转。播放速率不受影响。
+     * 开始一次长按：倍数从 1 起步，按住期间每 2 秒翻倍（上限 16 倍）。
+     * 这里只负责维护倍数，实际推进由系统按键重复事件驱动，所以进度条会连续移动，
+     * 不会出现「每 2 秒才走一步」。
      *
-     * 按比例跳转模式下不启用，等同于普通单击，也不做任何提示。
+     * 按比例跳转模式下不启用加速，倍数固定为 1，重复事件也不会推进。
      */
-    private fun startSeekRepeatAcceleration(forward: Boolean) {
-        if (AppSettings.isSeekByPercent(this) || !canPreviewSeek()) return
+    private fun startSeekRepeatAcceleration() {
+        seekAccelMultiplier = 1
         seekAccelJob?.cancel()
+        if (AppSettings.isSeekByPercent(this) || !canPreviewSeek()) return
         seekAccelJob = lifecycleScope.launch {
-            var multiplier = 1
             while (isActive) {
                 delay(SEEK_ACCEL_STEP_MS)
-                multiplier = (multiplier * 2).coerceAtMost(SEEK_ACCEL_MAX_MULTIPLIER)
-                handleSeekPress(forward = forward, multiplier = multiplier)
+                seekAccelMultiplier = (seekAccelMultiplier * 2).coerceAtMost(SEEK_ACCEL_MAX_MULTIPLIER)
             }
         }
     }
 
-    /** 松开按键：立即停止重复跳转并清除累计倍数。 */
+    /** 松开按键：立即停止加速并清除累计倍数，下次长按重新从 1 倍开始。 */
     private fun finishSeekRepeatAcceleration() {
         seekAccelJob?.cancel()
         seekAccelJob = null
+        seekAccelMultiplier = 1
     }
 
     private fun handleIntent(intent: Intent?) {
